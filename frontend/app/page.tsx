@@ -14,6 +14,7 @@ type Profile = {
   email: string;
   full_name: string;
   credits: number;
+  payments_enabled: boolean;
 };
 
 type Analysis = {
@@ -38,7 +39,7 @@ type Analysis = {
   };
   layer_4_mock: string[] | null;
   is_premium_unlocked: boolean;
-  credits_remaining: number;
+  credits_remaining: number | null;
   scoring_breakdown?: { category: "skills" | "experience" | "education"; weight: number; matched: number; total: number; score: number }[];
   requirements?: { category: string; jd_quote: string; cv_quote: string | null; matched: boolean }[];
 };
@@ -598,6 +599,24 @@ export default function Home() {
     await runAnalysis();
   }
 
+  async function unlockInterview() {
+    if (!session || !analysis) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const unlocked = await api<{ layer_4_mock: string[]; credits_remaining: number | null }>(
+        `/analyses/${analysis.analysis_id}/unlock`, session.access_token,
+        { method: "POST", body: JSON.stringify({}) }
+      );
+      setAnalysis({ ...analysis, layer_4_mock: unlocked.layer_4_mock,
+        is_premium_unlocked: true, credits_remaining: unlocked.credits_remaining });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không tạo được câu hỏi phỏng vấn.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createPayment() {
     if (!session) return;
     setBusy(true);
@@ -637,7 +656,7 @@ export default function Home() {
               <span className="avatar">{(profile?.full_name || session.user.email || "U").trim().charAt(0).toUpperCase()}</span>
               <span className="profile-name">{profile?.full_name || session.user.email}</span>
             </div>
-            <span className="credits-chip">Credits <strong>{profile?.credits ?? "—"}</strong></span>
+            {profile?.payments_enabled && <span className="credits-chip">Credits <strong>{profile.credits}</strong></span>}
             <button className="text-button" onClick={() => void signOut()}>Đăng xuất</button>
           </div>
         </div>
@@ -651,7 +670,7 @@ export default function Home() {
         </section>}
 
         {notice && <p role="status" className="notice notice-info no-print">{notice}</p>}
-        {profile?.credits === 0 && <p className="no-print">Bạn đã dùng hết lượt phân tích. <button type="button"
+        {profile?.payments_enabled && profile.credits === 0 && <p className="no-print">Bạn đã dùng hết lượt phân tích. <button type="button"
           className="secondary-button" disabled={busy || !!payment} onClick={() => void createPayment()}>
           Mua thêm 3 lượt · 29.000đ</button></p>}
         {paymentStatus && <p role="status" className="payment-status no-print">{paymentStatus}</p>}
@@ -839,15 +858,19 @@ export default function Home() {
               <GlassCard className="result-card interview-card">
                 <div className="interview-title">
                   <div className="section-heading"><span className="layer-icon layer-interview">☏</span><h3>Tầng 4: Luyện phỏng vấn</h3></div>
-                  {!analysis.layer_4_mock && <span className="premium-badge">PREMIUM</span>}
+                  {!analysis.layer_4_mock && profile?.payments_enabled && <span className="premium-badge">PREMIUM</span>}
                 </div>
                 {analysis.layer_4_mock ? (
                   <><ol className="question-list">{analysis.layer_4_mock.map((question, index) => <li key={`${index}-${question}`}><span>{String(index + 1).padStart(2, "0")}</span>{question}</li>)}</ol>
                     <button type="button" className="primary-button" disabled={busy} onClick={() => void startInterview()}>🎙 Bắt đầu luyện trả lời</button></>
                 ) : (
                   <>
-                    <p className="interview-copy">Mở khóa 3 câu hỏi phỏng vấn mô phỏng, được AI cá nhân hóa theo khoảng trống kỹ năng và dự án trong CV.</p>
-                    <button disabled={busy || !!payment} onClick={() => void createPayment()} className="unlock-button">♙ &nbsp; Mở khóa phiên phỏng vấn · 29.000đ</button>
+                    <p className="interview-copy">Tạo 3 câu hỏi phỏng vấn mô phỏng theo kỹ năng và dự án trong CV.</p>
+                    {profile?.payments_enabled
+                      ? <button disabled={busy || !!payment} onClick={() => void createPayment()} className="unlock-button">♙ &nbsp; Mở khóa phiên phỏng vấn · 29.000đ</button>
+                      : profile?.payments_enabled === false
+                        ? <button disabled={busy} onClick={() => void unlockInterview()} className="primary-button">Tạo câu hỏi và luyện miễn phí</button>
+                        : null}
                   </>
                 )}
               </GlassCard>
@@ -869,7 +892,7 @@ export default function Home() {
         </div>
         )}
 
-        <footer className="site-footer no-print"><span>AI Career Ready · Phân tích có trách nhiệm, không bịa đặt thông tin hồ sơ.</span><span>Còn lại {profile?.credits ?? "—"} credits</span></footer>
+        <footer className="site-footer no-print"><span>AI Career Ready · Phân tích có trách nhiệm, không bịa đặt thông tin hồ sơ.</span><span>{profile ? (profile.payments_enabled ? `Còn lại ${profile.credits} credits` : "Dùng thử miễn phí") : ""}</span></footer>
       </div>
     </main>
   );

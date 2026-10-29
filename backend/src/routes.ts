@@ -13,6 +13,7 @@ import { parseBody } from "./validation";
 import { synthesizeQuestion, transcribeAudio } from "./speech";
 
 const router = Router();
+const paymentsEnabled = Boolean(config.PAYOS_CLIENT_ID && config.PAYOS_API_KEY && config.PAYOS_CHECKSUM_KEY);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
@@ -95,7 +96,7 @@ router.get("/user/me", requireAuth, async (req: AuthenticatedRequest, res) => {
     const id = userId(req);
     const { data, error } = await supabase.from("users").select("id,email,full_name,credits").eq("id", id).single();
     if (error) throw error;
-    res.json({ user: data });
+    res.json({ user: { ...data, payments_enabled: paymentsEnabled } });
   } catch (error) {
     sendError(res, error);
   }
@@ -327,14 +328,16 @@ router.post("/analyze", requireAuth, async (req: AuthenticatedRequest, res) => {
       .single();
     if (cvError || !cv) throw new HttpError(404, "CV not found");
 
-    const { data: remainingCredits, error: creditError } = await supabase.rpc("consume_credit", { p_user_id: ownerId });
-    if (creditError) throw creditError;
-    if (remainingCredits === null) throw new HttpError(402, "No analysis credits remaining");
-    creditConsumed = true;
+    let remainingCredits: number | null = null;
+    if (paymentsEnabled) {
+      const { data, error } = await supabase.rpc("consume_credit", { p_user_id: ownerId });
+      if (error) throw error;
+      if (data === null) throw new HttpError(402, "No analysis credits remaining");
+      remainingCredits = data;
+      creditConsumed = true;
+    }
 
     const analysis = await analyzeCVvsJD(cv.masked_text, body.jd_text);
-    // A paid analysis credit includes the full interview. The first account credit
-    // therefore gives new users one complete, testable workflow.
     const premiumUnlocked = true;
     const { data: saved, error: saveError } = await supabase
       .from("analyses")
@@ -410,6 +413,10 @@ router.post("/analyses/:analysisId/unlock", requireAuth, async (req: Authenticat
       .single();
     if (analysisError || !analysis) throw new HttpError(404, "Analysis not found");
     if (analysis.layer_4_mock) {
+      if (!paymentsEnabled) {
+        res.json({ layer_4_mock: analysis.layer_4_mock, credits_remaining: null, already_unlocked: true });
+        return;
+      }
       const { data: profile, error: profileError } = await supabase
         .from("users")
         .select("credits")
@@ -428,6 +435,14 @@ router.post("/analyses/:analysisId/unlock", requireAuth, async (req: Authenticat
       .single();
     if (cvError || !cv) throw new HttpError(404, "CV not found");
     const questions = await generateMockQuestions(cv.masked_text, analysis.jd_text);
+    if (!paymentsEnabled) {
+      const { error: updateError } = await supabase.from("analyses")
+        .update({ layer_4_mock: questions, is_premium_unlocked: true })
+        .eq("id", analysis.id).eq("user_id", ownerId);
+      if (updateError) throw updateError;
+      res.json({ layer_4_mock: questions, credits_remaining: null, already_unlocked: false });
+      return;
+    }
     const { data: unlocked, error: unlockError } = await supabase.rpc("unlock_analysis", {
       p_user_id: ownerId,
       p_analysis_id: analysis.id,
@@ -449,6 +464,7 @@ router.post("/analyses/:analysisId/unlock", requireAuth, async (req: Authenticat
 router.post("/payment/create-qr", requireAuth, async (req: AuthenticatedRequest, res) => {
   let transactionId: string | undefined;
   try {
+    if (!paymentsEnabled) throw new HttpError(503, "Payments are not enabled");
     const body = parseBody(z.object({ package: z.literal("premium_29k") }), req.body);
     void body;
     const ownerId = userId(req);

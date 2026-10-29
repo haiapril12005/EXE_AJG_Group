@@ -5,7 +5,7 @@
 - Node.js 20+ và npm.
 - Một Supabase project với URL, publishable key và secret/service role key.
 - Gemini API key để dùng phân tích CV, phỏng vấn, Speech-to-Text và Text-to-Speech.
-- Thông tin PayOS nếu cần mua thêm lượt phân tích.
+- Thông tin PayOS chỉ khi dự án quyết định bật thu phí.
 
 ## Clone và cài đặt
 
@@ -27,7 +27,7 @@ Trong Supabase SQL Editor, chạy các file sau **theo thứ tự**, mỗi file 
 2. `supabase/migrations/002_cv_data.sql`
 3. `supabase/migrations/003_evaluation_and_interviews.sql`
 
-Nếu đã chạy 001 và 002 trước đây, chỉ chạy 003. Migration 003 thêm bảng đánh giá CV, phiên phỏng vấn, câu trả lời và các cột chứng cứ/điểm có trọng số. Tạo tài khoản bằng giao diện để trigger tạo hồ sơ người dùng với một credit ban đầu.
+Nếu đã chạy 001 và 002 trước đây, chỉ chạy 003. Migration 003 thêm bảng đánh giá CV, phiên phỏng vấn, câu trả lời và các cột chứng cứ/điểm có trọng số. Tạo tài khoản bằng giao diện để trigger tạo hồ sơ người dùng; credit trong schema không bị sử dụng khi PayOS chưa bật.
 
 ## Biến môi trường
 
@@ -40,7 +40,7 @@ Copy-Item backend/.env.example backend/.env
 
 Điền `GEMINI_API_KEY` tại `backend/.env`. Model mặc định: `gemini-3.6-flash` (phân tích và người phỏng vấn), `gemini-3.5-transcribe` (nhận dạng giọng nói), `gemini-3.8-flash-lite-tts` (đọc câu hỏi). Có thể thay bằng model tương thích qua các biến `GEMINI_MODEL`, `GEMINI_STT_MODEL`, `GEMINI_TTS_MODEL`; model phải khả dụng với API key và khu vực sử dụng.
 
-PayOS là tùy chọn cho lượt phân tích bổ sung. Nếu dùng, điền `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`, URL trả về và hủy. Cấu hình webhook công khai tới `https://<api-host>/api/payment/webhook`; PayOS cần gọi được backend để cộng credit. Một tài khoản mới có một lượt phân tích đầy đủ kể cả mock interview, nên có thể thử luồng cơ bản mà không cần PayOS.
+Để thử miễn phí, **để trống cả ba biến `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`**. Phân tích CV–JD và mock interview khi đó không trừ credit và giao diện không hiện nút mua lượt. Nếu sau này bật thu phí, điền đủ ba biến cùng URL trả về/hủy, rồi cấu hình webhook công khai tới `https://<api-host>/api/payment/webhook`.
 
 ## Chạy và kiểm tra
 

@@ -23,7 +23,7 @@ npm.cmd run db:check
 npm.cmd run dev
 ```
 
-Frontend: `http://localhost:3000`. API: `http://localhost:4000`. Tài khoản mới có một credit để chạy trọn bộ phân tích và phỏng vấn; gói PayOS thêm ba lượt phân tích khi được cấu hình.
+Frontend: `http://localhost:3000`. API: `http://localhost:4000`. Khi để trống ba biến PayOS, người dùng được phân tích và luyện phỏng vấn miễn phí, không bị trừ credit. Chỉ khi cấu hình đầy đủ PayOS mới bật giới hạn lượt và thanh toán.
 
 ## Chống AI bịa thông tin
 
