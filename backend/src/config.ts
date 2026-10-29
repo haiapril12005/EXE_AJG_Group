@@ -33,10 +33,10 @@ const publishableKey = parsedConfig.SUPABASE_PUBLISHABLE_KEY ?? parsedConfig.SUP
 const secretKey = parsedConfig.SUPABASE_SECRET_KEY ?? parsedConfig.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!publishableKey) {
-  throw new Error("Set SUPABASE_PUBLISHABLE_KEY in api/.env.");
+  throw new Error("Set SUPABASE_PUBLISHABLE_KEY in backend/.env.");
 }
 if (!secretKey) {
-  throw new Error("Set SUPABASE_SECRET_KEY in api/.env. Keep this key private.");
+  throw new Error("Set SUPABASE_SECRET_KEY in backend/.env. Keep this key private.");
 }
 
 export const config = {

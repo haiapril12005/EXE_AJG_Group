@@ -104,7 +104,7 @@ let gemini: ReturnType<typeof createGemini> | undefined;
 
 function getGemini(): ReturnType<typeof createGemini> {
   if (!config.GEMINI_API_KEY) {
-    throw new HttpError(503, "Configure GEMINI_API_KEY in api/.env to enable AI analysis");
+    throw new HttpError(503, "Configure GEMINI_API_KEY in backend/.env to enable AI analysis");
   }
   gemini ??= createGemini(config.GEMINI_API_KEY);
   return gemini;

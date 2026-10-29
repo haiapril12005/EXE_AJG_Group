@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-const envPath = new URL("../web/.env.local", import.meta.url);
+const envPath = new URL("../frontend/.env.local", import.meta.url);
 const entries = (await readFile(envPath, "utf8"))
   .split(/\r?\n/)
   .filter((line) => line && !line.trimStart().startsWith("#"))
@@ -13,7 +13,7 @@ const projectUrl = env.NEXT_PUBLIC_SUPABASE_URL;
 const publishableKey = env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 if (!projectUrl || !publishableKey) {
-  console.error("Missing Supabase URL or publishable key in web/.env.local");
+  console.error("Missing Supabase URL or publishable key in frontend/.env.local");
   process.exit(1);
 }
 

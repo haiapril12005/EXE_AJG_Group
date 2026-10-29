@@ -43,7 +43,7 @@ app.get("/health/ready", async (_req, res) => {
       database: error.code === "PGRST205" ? "schema_not_applied" : "unavailable",
       message: error.code === "PGRST205"
         ? "Apply supabase/migrations/001_initial_schema.sql in the Supabase SQL Editor."
-        : "Check the Supabase URL and API credentials in api/.env."
+        : "Check the Supabase URL and API credentials in backend/.env."
     });
     return;
   }

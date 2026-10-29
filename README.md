@@ -1,55 +1,47 @@
 # CV Fit MVP
 
-A Next.js frontend and Express API for private CV/JD analysis, backed by Supabase, OpenAI, and PayOS.
+Ứng dụng hỗ trợ phân tích CV và mô tả công việc, gồm giao diện Next.js, API Express và cơ sở dữ liệu Supabase. Gemini phục vụ phân tích AI; PayOS phục vụ thanh toán.
 
-## Requirements
+## Cấu trúc repository
 
-- Node.js 20+
-- A Supabase project
-- Google Gemini API key
-- PayOS credentials for payment flows
+```text
+backend/    Express API và xử lý nghiệp vụ
+frontend/   Ứng dụng Next.js
+supabase/   SQL migrations
+scripts/    Công cụ kiểm tra môi trường
+docs/       Hướng dẫn setup và quy trình Git
+```
 
-## Setup
+## Chạy trên máy
 
-1. Run `npm install` at the repository root.
-2. In Supabase Dashboard → **SQL Editor**, open a new query, paste the full contents of
-   `supabase/migrations/001_initial_schema.sql`, then click **Run** once.
-3. Copy `web/.env.example` to `web/.env.local`. Set the project URL and publishable key.
-   These are browser-safe values from **Project Settings → API Keys**.
-4. Run `npm run db:check` to verify that Supabase is reachable and all four tables exist.
-5. Copy `api/.env.example` to `api/.env`. Use the same project URL and publishable key
-   for `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`; set `SUPABASE_SECRET_KEY` from
-   Supabase **Project Settings → API Keys**. This key is private and must only be in
-   `api/.env`, never in a `NEXT_PUBLIC_` variable. `SUPABASE_JWKS_URL` defaults to the
-   project's standard JWKS endpoint if omitted.
-6. AI and PayOS settings are optional for starting the app. Create a Gemini API key in
-   Google AI Studio and set `GEMINI_API_KEY` in `api/.env` to enable analysis. Set the
-   three `PAYOS_*` credentials to enable checkout/webhooks.
-7. Run `npm run dev`, then open `http://localhost:3000`.
+Cần Node.js 20+ và một dự án Supabase. Làm theo [hướng dẫn setup](docs/setup.md) để tạo database và các file môi trường, sau đó chạy ở thư mục gốc:
 
-The web app runs at `http://localhost:3000`, and the API runs at `http://localhost:4000`.
-Check `http://localhost:4000/health/ready` for an authenticated database readiness
-probe; it reports clearly if the schema has not been applied.
-Auth users get one trial analysis credit. Each analysis consumes one credit; analyses made
-while credits remain include the mock-interview layer. A successful 29,000 VND PayOS
-payment grants three credits. If an analysis was made without enough remaining credits
-to include Mock Interview, the user can pay and spend one of the new credits to generate
-and unlock its interview questions. Configure the public webhook URL as
-`https://<your-api-host>/api/payment/webhook`.
+```powershell
+npm.cmd ci
+npm.cmd run db:check
+npm.cmd run dev
+```
 
-## Deployment
+Trên macOS/Linux, dùng `npm` thay cho `npm.cmd`. Giao diện chạy tại `http://localhost:3000`, API tại `http://localhost:4000`. Gemini và PayOS có thể để trống khi mới khởi động; các tính năng tương ứng chỉ hoạt động sau khi cấu hình khóa.
 
-Deploy `web` to Vercel and `api` to a Node.js host such as Render. Set the environment
-variables from `.env.example` in each service. Use the deployed frontend origin for
-`WEB_ORIGIN`, and update the PayOS return, cancel, and webhook URLs accordingly.
+## Kiểm tra trước khi mở pull request
 
-CV uploads are limited to 5 MB and PDF files. Raw extracted text is stored for the
-account owner; Gemini receives only the masked text. The analysis prompt requires
-verbatim CV evidence for matched skills, projects, and education, and the API verifies
-those quotes against the stored CV before saving. Never expose the Supabase secret key,
-Gemini key, or PayOS credentials to the browser.
+Điền các biến `NEXT_PUBLIC_SUPABASE_*` trong `frontend/.env.local` trước khi build production.
 
-The Express API verifies user access tokens against the project's JWKS endpoint,
-issuer, and `authenticated` audience before protected routes run. It accepts the
-current `SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_SECRET_KEY` names; the former
-`SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` names remain supported for migration.
+```powershell
+npm.cmd ci
+npm.cmd run typecheck
+npm.cmd run build
+```
+
+## Quy trình Git
+
+- `main`: phiên bản ổn định; chỉ nhận code từ `develop` khi nhóm hoàn thành và kiểm thử dự án.
+- `develop`: nhánh tích hợp code backend, frontend, database và docs. Thành viên tạo nhánh theo từng việc từ `develop`, rồi mở pull request về `develop`.
+- Các nhánh `feature/*`, `fix/*`, `docs/*` chỉ tồn tại trong lúc thực hiện task. Xem [quy trình Git](docs/git-workflow.md) để lấy code, cập nhật và gộp nhánh.
+
+Khi clone để phát triển, chạy `git switch develop` trước khi `git pull`; clone mặc định sẽ mở `main`.
+
+## Triển khai
+
+Deploy `frontend/` lên Vercel và `backend/` lên một Node.js host. Dùng các biến trong file `.env.example` của từng ứng dụng; đặt `WEB_ORIGIN` theo domain frontend và cập nhật URL PayOS cho môi trường triển khai. Không đưa Supabase secret key, Gemini key hoặc thông tin PayOS vào biến `NEXT_PUBLIC_`.

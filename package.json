@@ -2,13 +2,13 @@
   "name": "cv-fit-mvp",
   "private": true,
   "workspaces": [
-    "api",
-    "web"
+    "backend",
+    "frontend"
   ],
   "scripts": {
-    "dev": "concurrently -k \"npm:dev --workspace api\" \"npm:dev --workspace web\"",
-    "build": "npm run build --workspace api && npm run build --workspace web",
-    "typecheck": "npm run typecheck --workspace api && npm run typecheck --workspace web",
+    "dev": "concurrently -k \"npm:dev --workspace backend\" \"npm:dev --workspace frontend\"",
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
     "db:check": "node scripts/check-supabase.mjs"
   },
   "devDependencies": {
