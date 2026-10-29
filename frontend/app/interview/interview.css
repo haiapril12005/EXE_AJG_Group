@@ -1,0 +1,22 @@
+.interview-shell { max-width: 920px; margin: 0 auto; padding: 24px 20px 80px; color: #183047; }
+.interview-header { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 12px 0 28px; }
+.interview-header a { color: #087c80; text-decoration: none; }
+.interview-intro { margin-bottom: 24px; }
+.interview-intro h1 { font-size: clamp(2rem, 4vw, 3rem); margin: 8px 0; }
+.interview-intro p { line-height: 1.6; }
+.interview-progress { display: flex; gap: 10px; margin: 18px 0; flex-wrap: wrap; }
+.interview-progress button { border: 1px solid #c9d9df; background: white; border-radius: 999px; padding: 10px 16px; cursor: pointer; }
+.interview-progress button.is-current { background: #087c80; border-color: #087c80; color: white; }
+.interview-card { border: 1px solid #dce7ea; border-radius: 18px; background: white; box-shadow: 0 12px 35px rgba(12, 48, 62, .06); padding: 26px; margin: 18px 0; }
+.interview-card h2 { margin: 8px 0 22px; line-height: 1.4; }
+.interview-card h3 { margin: 20px 0 8px; }
+.interview-card p { line-height: 1.6; }
+.interview-card small { display: block; color: #607584; }
+.question-label { color: #087c80; font-weight: 700; letter-spacing: .08em; }
+.interview-actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
+.interview-card textarea { width: 100%; min-height: 170px; }
+.interview-hint { color: #607584; font-size: .9rem; }
+.interview-answer { white-space: pre-wrap; background: #f5fafb; border-radius: 12px; padding: 16px; }
+.feedback-score { font-size: 1.15rem; color: #087c80; }
+.feedback-score strong, .interview-finish strong { font-size: 1.7rem; }
+@media (max-width: 600px) { .interview-header { align-items: flex-start; flex-direction: column; } .interview-card { padding: 18px; } }

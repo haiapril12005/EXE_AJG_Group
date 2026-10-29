@@ -35,14 +35,14 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 app.get("/health/ready", async (_req, res) => {
-  const { error } = await supabase.from("users").select("id").limit(1);
+  const { error } = await supabase.from("interview_sessions").select("id").limit(1);
   if (error) {
     console.error("Database readiness check failed", error);
     res.status(503).json({
       status: "not_ready",
       database: error.code === "PGRST205" ? "schema_not_applied" : "unavailable",
       message: error.code === "PGRST205"
-        ? "Apply supabase/migrations/001_initial_schema.sql in the Supabase SQL Editor."
+        ? "Apply all files in supabase/migrations in order."
         : "Check the Supabase URL and API credentials in backend/.env."
     });
     return;
@@ -59,7 +59,8 @@ const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _next) => 
   }
   if (
     error instanceof Error &&
-    (error.name === "MulterError" || error.message.includes("Only PDF files are allowed"))
+    (error.name === "MulterError" || error.message.includes("Only PDF files are allowed") ||
+      error.message.includes("Only audio recordings are allowed"))
   ) {
     res.status(400).json({ error: error.message });
     return;

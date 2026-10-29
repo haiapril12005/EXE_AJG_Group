@@ -39,7 +39,18 @@ type Analysis = {
   layer_4_mock: string[] | null;
   is_premium_unlocked: boolean;
   credits_remaining: number;
+  scoring_breakdown?: { category: "skills" | "experience" | "education"; weight: number; matched: number; total: number; score: number }[];
+  requirements?: { category: string; jd_quote: string; cv_quote: string | null; matched: boolean }[];
 };
+
+type QualityEvaluation = {
+  quality_score: number;
+  issues: { category: "content" | "presentation"; severity: string; finding: string;
+    suggestion: string; evidence_quote: string | null }[];
+  note?: string;
+};
+type SavedCv = { id: string; original_name: string; created_at: string };
+type SavedAnalysis = { id: string; cv_id: string; jd_text: string; rci_score: number; created_at: string };
 
 const ANALYSIS_STEPS = [
   "Đang phân tích kỹ năng...",
@@ -167,6 +178,9 @@ export default function Home() {
   const [cvId, setCvId] = useState("");
   const [jd, setJd] = useState("");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [quality, setQuality] = useState<QualityEvaluation | null>(null);
+  const [savedCvs, setSavedCvs] = useState<SavedCv[]>([]);
+  const [pastAnalyses, setPastAnalyses] = useState<SavedAnalysis[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [payment, setPayment] = useState<{ order_code: number; checkoutUrl: string; qrImage: string | null } | null>(null);
@@ -200,6 +214,15 @@ export default function Home() {
     setProfile(result.user);
   }, []);
 
+  const refreshHistory = useCallback(async (token: string) => {
+    const [cvs, analyses] = await Promise.all([
+      api<{ cvs: SavedCv[] }>("/cv", token),
+      api<{ analyses: SavedAnalysis[] }>("/analyses", token)
+    ]);
+    setSavedCvs(cvs.cvs);
+    setPastAnalyses(analyses.analyses);
+  }, []);
+
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("cv-fit-theme");
     if (savedTheme === "dark" || savedTheme === "light") setTheme(savedTheme);
@@ -230,7 +253,10 @@ export default function Home() {
     if (session) void refreshProfile(session.access_token).catch((error: Error) => {
       setNotice(error.message);
     });
-  }, [session, refreshProfile]);
+    if (session) void refreshHistory(session.access_token).catch((error: Error) => {
+      setNotice(error.message);
+    });
+  }, [session, refreshProfile, refreshHistory]);
 
   useEffect(() => {
     if (!session || !payment) return;
@@ -244,10 +270,11 @@ export default function Home() {
         );
         if (!active) return;
         if (result.transaction.status === "SUCCESS") {
-          setPaymentStatus("Thanh toán thành công! Đang mở khóa Mock Interview...");
+          setPaymentStatus("Thanh toán thành công! Đang cập nhật lượt phân tích...");
           if (!analysis || analysis.layer_4_mock || unlocking) {
-            if (analysis?.layer_4_mock) {
+            if (!unlocking) {
               setPayment(null);
+              setPaymentStatus("Đã cộng 3 lượt phân tích vào tài khoản.");
               await refreshProfile(session.access_token);
             }
             return;
@@ -296,8 +323,10 @@ export default function Home() {
       setCvData(result.cv_data ?? null);
       setSaveState("saved");
       setAnalysis(null);
+      setQuality(null);
       setEditorOpen(false);
       setNotice("CV đã được tải lên an toàn. Số điện thoại và email được che trước khi gửi AI.");
+      await refreshHistory(session.access_token);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể tải CV.");
     } finally {
@@ -319,6 +348,7 @@ export default function Home() {
       setCvData(null);
       setEditorOpen(false);
       setAnalysis(null);
+      setQuality(null);
     }
   }
 
@@ -355,14 +385,65 @@ export default function Home() {
     setLoadingCv(true);
     try {
       const result = await api<{ cv_data: CvData }>(`/cv/${id}`, token);
+      setCvId(id);
       dirtyRef.current = false;
       setCvData(result.cv_data);
+      setQuality(null);
       setSaveState("saved");
-      if (open) setEditorOpen(true);
+      if (open) { setEditorOpen(true); setAnalysis(null); }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể mở CV.");
     } finally {
       setLoadingCv(false);
+    }
+  }
+
+  async function evaluateCv() {
+    if (!session || !cvId) return;
+    setBusy(true);
+    setNotice("Đang đánh giá chất lượng CV...");
+    try {
+      await flushSave();
+      const result = await api<QualityEvaluation>(`/cv/${cvId}/evaluate`, session.access_token,
+        { method: "POST", body: JSON.stringify({}) });
+      setQuality(result);
+      setNotice("Đã hoàn tất đánh giá CV độc lập với JD.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể đánh giá CV.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openAnalysis(id: string) {
+    if (!session) return;
+    setBusy(true);
+    try {
+      const result = await api<{ analysis: Analysis & { cv_id: string; jd_text: string } }>(
+        `/analyses/${id}`, session.access_token);
+      setCvId(result.analysis.cv_id);
+      setJd(result.analysis.jd_text);
+      await loadCv(result.analysis.cv_id, session.access_token, false);
+      setAnalysis(result.analysis);
+      setEditorOpen(true);
+      setQuality(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không mở được báo cáo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startInterview() {
+    if (!session || !analysis) return;
+    setBusy(true);
+    try {
+      const result = await api<{ session: { id: string } }>("/interviews", session.access_token,
+        { method: "POST", body: JSON.stringify({ analysis_id: analysis.analysis_id }) });
+      window.location.href = `/interview?id=${encodeURIComponent(result.session.id)}`;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không bắt đầu được phiên phỏng vấn.");
+      setBusy(false);
     }
   }
 
@@ -497,6 +578,7 @@ export default function Home() {
       });
       setAnalysis(result);
       await refreshProfile(session.access_token);
+      await refreshHistory(session.access_token);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể phân tích CV.");
     } finally {
@@ -512,10 +594,8 @@ export default function Home() {
       setNotice("Không thể lưu CV trước khi phân tích.");
       return;
     }
-    await Promise.all([
-      runAnalysis(),
-      !cvRef.current && session ? loadCv(cvId, session.access_token, false) : Promise.resolve()
-    ]);
+    if (!cvRef.current && session) await loadCv(cvId, session.access_token, false);
+    await runAnalysis();
   }
 
   async function createPayment() {
@@ -571,6 +651,15 @@ export default function Home() {
         </section>}
 
         {notice && <p role="status" className="notice notice-info no-print">{notice}</p>}
+        {profile?.credits === 0 && <p className="no-print">Bạn đã dùng hết lượt phân tích. <button type="button"
+          className="secondary-button" disabled={busy || !!payment} onClick={() => void createPayment()}>
+          Mua thêm 3 lượt · 29.000đ</button></p>}
+        {paymentStatus && <p role="status" className="payment-status no-print">{paymentStatus}</p>}
+        {payment && <div className="payment-panel no-print">
+          {payment.qrImage && <img src={payment.qrImage} alt="Mã QR thanh toán PayOS" className="payment-qr" />}
+          <div><strong>Đơn hàng #{payment.order_code}</strong><p>Quét mã bằng ứng dụng ngân hàng hoặc mở trang thanh toán PayOS.</p>
+            <a href={payment.checkoutUrl} target="_blank" rel="noreferrer">Mở trang thanh toán ↗</a></div>
+        </div>}
 
         {!workspace && <section className="input-grid" aria-label="Thông tin CV và mô tả công việc">
           <GlassCard className="input-card">
@@ -607,6 +696,7 @@ export default function Home() {
             </form>
             <div className="cv-alt-actions">
               {cvId && <button type="button" disabled={loadingCv} className="secondary-button" onClick={() => session && void loadCv(cvId, session.access_token, true)}>{loadingCv ? "Đang chuẩn bị CV..." : "✎ Chỉnh sửa CV trên web"}</button>}
+              {cvId && <button type="button" disabled={busy} className="secondary-button" onClick={() => void evaluateCv()}>◎ Đánh giá chất lượng CV</button>}
               <a href="/create" className="secondary-button link-button">＋ Hoặc tạo CV mới từ form</a>
             </div>
           </GlassCard>
@@ -634,6 +724,36 @@ export default function Home() {
           </GlassCard>
         </section>}
 
+        {!workspace && (savedCvs.length > 0 || pastAnalyses.length > 0) && <section className="history-section no-print">
+          <h2>Hồ sơ và báo cáo gần đây</h2>
+          <div className="history-grid">
+            <GlassCard><h3>CV đã lưu</h3>
+              {savedCvs.map((item) => <button key={item.id} type="button" className="history-item"
+                onClick={() => session && void loadCv(item.id, session.access_token, true)}>
+                <strong>{item.original_name}</strong><small>{new Date(item.created_at).toLocaleDateString("vi-VN")}</small>
+              </button>)}
+            </GlassCard>
+            <GlassCard><h3>Phân tích đã lưu</h3>
+              {pastAnalyses.map((item) => <button key={item.id} type="button" className="history-item"
+                onClick={() => void openAnalysis(item.id)}>
+                <strong>Phù hợp {item.rci_score}%</strong><small>{new Date(item.created_at).toLocaleDateString("vi-VN")} · {item.jd_text.slice(0, 65)}...</small>
+              </button>)}
+            </GlassCard>
+          </div>
+        </section>}
+
+        {quality && <section className="quality-section">
+          <GlassCard>
+            <div className="quality-heading"><div><p className="eyebrow">CV EVALUATION</p><h2>Chất lượng CV</h2></div>
+              <strong>{quality.quality_score}/100</strong></div>
+            <p>{quality.note ?? "Điểm dựa trên độ đầy đủ, độ rõ ràng và cấu trúc văn bản."}</p>
+            {quality.issues.length ? <ul className="quality-issues">{quality.issues.map((issue, index) =>
+              <li key={index}><strong>{issue.finding}</strong><span> — {issue.suggestion}</span>
+                {issue.evidence_quote && <blockquote>“{issue.evidence_quote}”</blockquote>}</li>)}</ul>
+              : <p>Chưa phát hiện vấn đề rõ ràng trong nội dung CV.</p>}
+          </GlassCard>
+        </section>}
+
         {workspace && cvData && (
         <div className="split-layout">
         <div className="split-left no-print">
@@ -657,6 +777,14 @@ export default function Home() {
               <div><p className="eyebrow">BÁO CÁO PHÂN TÍCH</p><h2>Phân tích mức độ phù hợp</h2><p>Đối chiếu theo Rubric 4 tầng tiêu chuẩn.</p></div>
               <div className="score-summary"><span>MỨC ĐỘ BAO PHỦ</span><strong>{prevScore !== null && prevScore !== analysis.rci_score && <small className="score-prev">{prevScore}% →</small>}{analysis.rci_score}<small>%</small></strong></div>
             </div>
+
+            {analysis.scoring_breakdown && <div className="scoring-breakdown">
+              <strong>Điểm theo quy tắc cố định</strong>
+              {analysis.scoring_breakdown.map((item) => <p key={item.category}>
+                <span>{item.category === "skills" ? "Kỹ năng" : item.category === "experience" ? "Kinh nghiệm / dự án" : "Học vấn"} · trọng số {item.weight}%</span>
+                <b>{item.matched}/{item.total} yêu cầu · {item.score}%</b>
+              </p>)}
+            </div>}
 
             <div className="results-grid">
               <GlassCard className="result-card">
@@ -714,18 +842,14 @@ export default function Home() {
                   {!analysis.layer_4_mock && <span className="premium-badge">PREMIUM</span>}
                 </div>
                 {analysis.layer_4_mock ? (
-                  <ol className="question-list">{analysis.layer_4_mock.map((question, index) => <li key={`${index}-${question}`}><span>{String(index + 1).padStart(2, "0")}</span>{question}</li>)}</ol>
+                  <><ol className="question-list">{analysis.layer_4_mock.map((question, index) => <li key={`${index}-${question}`}><span>{String(index + 1).padStart(2, "0")}</span>{question}</li>)}</ol>
+                    <button type="button" className="primary-button" disabled={busy} onClick={() => void startInterview()}>🎙 Bắt đầu luyện trả lời</button></>
                 ) : (
                   <>
                     <p className="interview-copy">Mở khóa 3 câu hỏi phỏng vấn mô phỏng, được AI cá nhân hóa theo khoảng trống kỹ năng và dự án trong CV.</p>
                     <button disabled={busy || !!payment} onClick={() => void createPayment()} className="unlock-button">♙ &nbsp; Mở khóa phiên phỏng vấn · 29.000đ</button>
                   </>
                 )}
-                {paymentStatus && <p role="status" className="payment-status">{paymentStatus}</p>}
-                {payment && <div className="payment-panel">
-                  {payment.qrImage && <img src={payment.qrImage} alt="Mã QR thanh toán PayOS" className="payment-qr" />}
-                  <div><strong>Đơn hàng #{payment.order_code}</strong><p>Quét mã bằng ứng dụng ngân hàng hoặc mở trang thanh toán PayOS.</p><a href={payment.checkoutUrl} target="_blank" rel="noreferrer">Mở trang thanh toán ↗</a></div>
-                </div>}
               </GlassCard>
             </div>
             <p className="results-disclaimer">♧ &nbsp; Dữ liệu liên hệ được ẩn danh. Điểm số không phản ánh xác suất trúng tuyển.</p>

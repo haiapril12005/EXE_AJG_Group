@@ -28,14 +28,20 @@ try {
   console.log(`${auth.ok ? "PASS" : "FAIL"} Supabase Auth reachable (HTTP ${auth.status})`);
   if (!auth.ok) failed = true;
 
-  for (const table of ["users", "cv_documents", "analyses", "transactions"]) {
-    const response = await fetch(`${projectUrl}/rest/v1/${table}?select=id&limit=0`, { headers });
+  const tables = [
+    ["users", "id"], ["cv_documents", "cv_data"],
+    ["analyses", "requirements,scoring_breakdown"], ["transactions", "id"],
+    ["cv_evaluations", "id"], ["interview_sessions", "id"],
+    ["interview_answers", "session_id"]
+  ];
+  for (const [table, columns] of tables) {
+    const response = await fetch(`${projectUrl}/rest/v1/${table}?select=${columns}&limit=0`, { headers });
     if (response.ok) {
       console.log(`PASS public.${table} is available`);
     } else {
       const body = await response.json().catch(() => ({}));
       if (body.code === "PGRST205") {
-        console.error(`FAIL public.${table} is missing; apply the Supabase SQL migration first`);
+        console.error(`FAIL public.${table} is missing; apply all Supabase SQL migrations first`);
       } else {
         console.error(`FAIL public.${table} returned HTTP ${response.status}: ${body.message ?? "unknown error"}`);
       }
