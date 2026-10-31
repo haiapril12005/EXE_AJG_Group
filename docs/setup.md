@@ -29,6 +29,8 @@ Trong Supabase SQL Editor, chạy các file sau **theo thứ tự**, mỗi file 
 
 Nếu đã chạy 001 và 002 trước đây, chỉ chạy 003. Migration 003 thêm bảng đánh giá CV, phiên phỏng vấn, câu trả lời và các cột chứng cứ/điểm có trọng số. Tạo tài khoản bằng giao diện để trigger tạo hồ sơ người dùng; credit trong schema không bị sử dụng khi PayOS chưa bật.
 
+Để người dùng xác nhận đăng ký bằng mã gửi tới email, làm thêm các bước [cấu hình email OTP](email-otp.md): bật Confirm email, cập nhật mẫu Confirm sign up và cấu hình SMTP. API key trong `.env` không tự bật dịch vụ gửi thư tới mọi người dùng.
+
 ## Biến môi trường
 
 ```powershell

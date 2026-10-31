@@ -9,10 +9,15 @@
     "dev": "concurrently -k \"npm:dev --workspace backend\" \"npm:dev --workspace frontend\"",
     "build": "npm run build --workspace backend && npm run build --workspace frontend",
     "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
-    "test": "npm run test --workspace backend",
-    "db:check": "node scripts/check-supabase.mjs"
+    "test": "npm run test --workspace backend && npm run test:auth",
+    "test:auth": "node --import tsx --test frontend/test/auth-flow.test.ts",
+    "test:auth-ui": "playwright test",
+    "db:check": "node scripts/check-supabase.mjs",
+    "auth:check": "node scripts/check-auth-email.mjs"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "@playwright/test": "^1.64.1",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.3"
   }
 }

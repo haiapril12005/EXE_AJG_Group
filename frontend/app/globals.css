@@ -1032,6 +1032,53 @@ button:disabled {
   font-weight: 900;
 }
 
+.auth-email {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.otp-input {
+  min-height: 58px;
+  text-align: center;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: .18em;
+  font-variant-numeric: tabular-nums;
+}
+
+.otp-input::placeholder {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+.auth-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.auth-error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.auth-card .notice { margin: 0; }
+.auth-verification-actions { display: grid; gap: 14px; margin-top: 16px; }
+.auth-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+.auth-links button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .loading-shell {
   display: grid;
   min-height: 100vh;

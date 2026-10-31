@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { CvPaper, emptyCv, type CvData, type RewriteSection } from "./cv-editor";
+import { AuthScreen } from "./auth-screen";
 import "./workspace.css";
 
 const supabase = createClient();
@@ -79,78 +80,6 @@ async function api<T>(path: string, token: string, init?: RequestInit): Promise<
 
 function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <section className={`soft-card ${className}`}>{children}</section>;
-}
-
-function AuthScreen({ onSession, theme, onToggleTheme }: {
-  onSession: (session: Session) => void;
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
-}) {
-  const [register, setRegister] = useState(false);
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setMessage("");
-    try {
-      if (register) {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { data: { full_name: fullName } }
-        });
-        if (error) throw error;
-        if (!data.session) {
-          setMessage("Vui lòng kiểm tra email để xác nhận tài khoản.");
-        } else {
-          onSession(data.session);
-        }
-      } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        onSession(data.session);
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Đã xảy ra lỗi.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <main className={`app-shell ${theme === "dark" ? "theme-dark" : ""}`}>
-      <div className="auth-topbar">
-        <Brand />
-        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-      </div>
-      <div className="auth-wrap">
-        <GlassCard className="auth-card">
-          <div className="auth-mark" aria-hidden="true">✦</div>
-          <p className="eyebrow">AI CAREER READY</p>
-          <h1>{register ? "Tạo tài khoản" : "Chào mừng trở lại"}</h1>
-          <p className="muted-copy">Đối chiếu CV với công việc mơ ước và chuẩn bị phỏng vấn tự tin hơn.</p>
-          <form className="form-stack" onSubmit={submit}>
-            {register && <label className="field-label">Họ và tên<input required value={fullName} onChange={(event) => setFullName(event.target.value)} className="form-input" autoComplete="name" /></label>}
-            <label className="field-label">Email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="form-input" autoComplete="email" /></label>
-            <label className="field-label">Mật khẩu<input required type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} className="form-input" autoComplete={register ? "new-password" : "current-password"} /></label>
-            {message && <p role="status" className="notice notice-info">{message}</p>}
-            <button disabled={busy} className="primary-button">{busy ? "Đang xử lý..." : register ? "Tạo tài khoản miễn phí" : "Đăng nhập"}</button>
-          </form>
-          <p className="auth-switch">
-            {register ? "Đã có tài khoản?" : "Chưa có tài khoản?"}{" "}
-            <button onClick={() => { setRegister(!register); setMessage(""); }}>
-              {register ? "Đăng nhập" : "Đăng ký"}
-            </button>
-          </p>
-        </GlassCard>
-      </div>
-    </main>
-  );
 }
 
 function Brand() {
@@ -310,24 +239,29 @@ export default function Home() {
     return () => { active = false; window.clearInterval(timer); };
   }, [session, payment, analysis, refreshProfile]);
 
+  async function saveSelectedFile(file: File, token: string): Promise<string> {
+    const form = new FormData();
+    form.append("file", file);
+    const result = await api<{ cv_id: string; cv_data?: CvData }>("/cv/upload", token, { method: "POST", body: form });
+    dirtyRef.current = false;
+    setCvId(result.cv_id);
+    setCvData(result.cv_data ?? null);
+    setSaveState("saved");
+    setAnalysis(null);
+    setQuality(null);
+    setEditorOpen(false);
+    await refreshHistory(token);
+    return result.cv_id;
+  }
+
   async function uploadCV(event: FormEvent) {
     event.preventDefault();
     if (!session || !selectedFile) return;
     setBusy(true);
     setNotice("");
     try {
-      const form = new FormData();
-      form.append("file", selectedFile);
-      const result = await api<{ cv_id: string; cv_data?: CvData }>("/cv/upload", session.access_token, { method: "POST", body: form });
-      dirtyRef.current = false;
-      setCvId(result.cv_id);
-      setCvData(result.cv_data ?? null);
-      setSaveState("saved");
-      setAnalysis(null);
-      setQuality(null);
-      setEditorOpen(false);
+      await saveSelectedFile(selectedFile, session.access_token);
       setNotice("CV đã được tải lên an toàn. Số điện thoại và email được che trước khi gửi AI.");
-      await refreshHistory(session.access_token);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể tải CV.");
     } finally {
@@ -566,8 +500,8 @@ export default function Home() {
     window.print();
   }
 
-  async function runAnalysis() {
-    if (!session || !cvId) return;
+  async function runAnalysis(id = cvId) {
+    if (!session || !id) return;
     setBusy(true);
     setNotice("");
     setPaymentStatus("");
@@ -575,7 +509,7 @@ export default function Home() {
     try {
       const result = await api<Analysis>("/analyze", session.access_token, {
         method: "POST",
-        body: JSON.stringify({ cv_id: cvId, jd_text: jd })
+        body: JSON.stringify({ cv_id: id, jd_text: jd })
       });
       setAnalysis(result);
       await refreshProfile(session.access_token);
@@ -589,14 +523,23 @@ export default function Home() {
 
   async function analyze(event: FormEvent) {
     event.preventDefault();
+    if (!session || busy) return;
+    setBusy(true);
+    setNotice("");
     try {
       await flushSave();
-    } catch {
-      setNotice("Không thể lưu CV trước khi phân tích.");
-      return;
+      const id = cvId || (selectedFile ? await saveSelectedFile(selectedFile, session.access_token) : "");
+      if (!id) {
+        setNotice("Hãy chọn CV để phân tích.");
+        return;
+      }
+      if (!cvRef.current) await loadCv(id, session.access_token, false);
+      await runAnalysis(id);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể chuẩn bị CV trước khi phân tích.");
+    } finally {
+      setBusy(false);
     }
-    if (!cvRef.current && session) await loadCv(cvId, session.access_token, false);
-    await runAnalysis();
   }
 
   async function unlockInterview() {
@@ -640,7 +583,8 @@ export default function Home() {
   if (authLoading) {
     return <main className={`app-shell loading-shell ${theme === "dark" ? "theme-dark" : ""}`}><p>Đang kiểm tra phiên đăng nhập...</p></main>;
   }
-  if (!session) return <AuthScreen onSession={setSession} theme={theme} onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")} />;
+  if (!session) return <AuthScreen onSession={setSession} theme={theme}
+    header={<><Brand /><ThemeToggle theme={theme} onToggle={() => setTheme(theme === "light" ? "dark" : "light")} /></>} />;
 
   const workspace = !!cvData && (editorOpen || !!analysis);
 
@@ -736,8 +680,8 @@ export default function Home() {
                 className="jd-input"
               />
               <div className="input-meta"><span>Tối thiểu 50 ký tự</span><span>{jd.length.toLocaleString("vi-VN")}/20.000</span></div>
-              <button disabled={!cvId || jd.trim().length < 50 || busy || !!payment} className="primary-button analyze-button">
-                <span aria-hidden="true">✦</span>{busy && cvId ? ANALYSIS_STEPS[stepIndex % ANALYSIS_STEPS.length] : "Phân tích bằng AI"}
+              <button disabled={(!cvId && !selectedFile) || jd.trim().length < 50 || busy || !!payment} className="primary-button analyze-button">
+                <span aria-hidden="true">✦</span>{busy && !cvId ? "Đang tải và đọc CV..." : busy ? ANALYSIS_STEPS[stepIndex % ANALYSIS_STEPS.length] : "Phân tích bằng AI"}
               </button>
             </form>
           </GlassCard>

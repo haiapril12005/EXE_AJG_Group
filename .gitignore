@@ -1,6 +1,9 @@
 node_modules/
 dist/
 .next/
+.next-playwright/
+test-results/
+playwright-report/
 .env
 .env.*
 !.env.example
