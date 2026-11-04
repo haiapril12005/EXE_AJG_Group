@@ -45,29 +45,83 @@ export function assertStructuredCvGrounded(source: string, values: string[]): vo
   }
 }
 
+/** What the AI returns before any of it is checked against the documents. */
+export type RawRequirement = { category: string; jd_quote: string; cv_quote: string | null };
+
+const MAX_REQUIREMENTS = 20;
+const MAX_QUOTE_LENGTH = 400;
+const CATEGORIES = Object.keys(SCORING_WEIGHTS) as RequirementCategory[];
+
+function isCategory(value: string): value is RequirementCategory {
+  return (CATEGORIES as string[]).includes(value);
+}
+
+/**
+ * Drops requirements the JD does not state word for word and counts a CV quote that cannot be
+ * found in the CV as unmet. A mistake by the AI can therefore lower the score but never raise it,
+ * and one bad quote no longer throws the whole analysis away.
+ */
+export function groundRequirements(requirements: RawRequirement[], cvText: string, jdText: string) {
+  const grounded: ScoredRequirement[] = [];
+  const byQuote = new Map<string, ScoredRequirement>();
+  let unverified = 0;
+  for (const item of requirements) {
+    const jdQuote = item.jd_quote.trim();
+    if (!isCategory(item.category) || jdQuote.length > MAX_QUOTE_LENGTH || !isGroundedQuote(jdText, jdQuote)) continue;
+    const cvQuote = item.cv_quote?.trim() ?? "";
+    const matched = cvQuote.length <= MAX_QUOTE_LENGTH && isGroundedQuote(cvText, cvQuote);
+    if (cvQuote && !matched) unverified += 1;
+    const key = normalizeEvidence(jdQuote);
+    const existing = byQuote.get(key);
+    if (existing) {
+      // The same JD line listed twice counts once, as met if either copy carried CV evidence.
+      if (matched && !existing.matched) Object.assign(existing, { cv_quote: cvQuote, matched: true });
+      continue;
+    }
+    if (grounded.length === MAX_REQUIREMENTS) continue;
+    const requirement = { category: item.category, jd_quote: jdQuote, cv_quote: matched ? cvQuote : null, matched };
+    byQuote.set(key, requirement);
+    grounded.push(requirement);
+  }
+  return { requirements: grounded, dropped: requirements.length - grounded.length, unverified };
+}
+
+/** Keeps project feedback only for projects named in the CV and backed by a CV quote. */
+export function groundProjects<T extends { project_name: string; evidence: string }>(projects: T[], cvText: string): T[] {
+  const source = normalizeEvidence(cvText);
+  return projects.filter((item) => {
+    const name = normalizeEvidence(item.project_name);
+    return name.length >= 2 && source.includes(name) && isGroundedQuote(cvText, item.evidence);
+  });
+}
+
+export function groundEvidence<T extends { quote: string }>(items: T[], source: string): T[] {
+  return items.filter((item) => isGroundedQuote(source, item.quote));
+}
+
+type InterviewFeedbackShape = {
+  strengths: { claim: string; quote: string }[];
+  improvements: { finding: string; suggestion: string; answer_quote: string | null }[];
+};
+
+/** A strength needs a real quote from the answer; an improvement may stand without one. */
+export function groundInterviewFeedback<T extends InterviewFeedbackShape>(feedback: T, answer: string): T {
+  return {
+    ...feedback,
+    strengths: groundEvidence(feedback.strengths, answer),
+    improvements: feedback.improvements.map((item) =>
+      item.answer_quote !== null && !isGroundedQuote(answer, item.answer_quote) ? { ...item, answer_quote: null } : item)
+  };
+}
+
 export function scoreRequirements(
-  requirements: GroundedRequirement[],
+  requirements: RawRequirement[],
   cvText: string,
   jdText: string
-): { score: number; breakdown: ScoringBreakdown; requirements: ScoredRequirement[] } {
-  if (requirements.length < 1 || requirements.length > 20) {
-    throw new Error("Analysis must include 1 to 20 JD requirements");
-  }
-  const seen = new Set<string>();
-  const grounded = requirements.map((item) => {
-    if (!(item.category in SCORING_WEIGHTS) || !isGroundedQuote(jdText, item.jd_quote)) {
-      throw new Error("AI returned a JD requirement without a valid JD quote");
-    }
-    const key = normalizeEvidence(item.jd_quote);
-    if (seen.has(key)) throw new Error("AI returned a duplicate JD requirement");
-    seen.add(key);
-    if (item.cv_quote !== null && !isGroundedQuote(cvText, item.cv_quote)) {
-      throw new Error("AI returned a CV match without a valid CV quote");
-    }
-    return { ...item, matched: item.cv_quote !== null };
-  });
-  const active = (Object.keys(SCORING_WEIGHTS) as RequirementCategory[])
-    .filter((category) => grounded.some((item) => item.category === category));
+): { score: number; breakdown: ScoringBreakdown; requirements: ScoredRequirement[]; dropped: number; unverified: number } {
+  const { requirements: grounded, dropped, unverified } = groundRequirements(requirements, cvText, jdText);
+  if (!grounded.length) throw new Error("No JD requirement could be verified against the JD text");
+  const active = CATEGORIES.filter((category) => grounded.some((item) => item.category === category));
   const activeWeight = active.reduce((sum, category) => sum + SCORING_WEIGHTS[category], 0);
   const breakdown = active.map((category) => {
     const categoryItems = grounded.filter((item) => item.category === category);
@@ -83,7 +137,7 @@ export function scoreRequirements(
   const score = Math.round(grounded.reduce((sum, item) =>
     sum + (item.matched ? SCORING_WEIGHTS[item.category] /
       grounded.filter((other) => other.category === item.category).length : 0), 0) * 100 / activeWeight);
-  return { score, breakdown, requirements: grounded };
+  return { score, breakdown, requirements: grounded, dropped, unverified };
 }
 
 export function assertSourceBoundRewrite(source: string, statements: { text: string; source_quote: string }[]): string {

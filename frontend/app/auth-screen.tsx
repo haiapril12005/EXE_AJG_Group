@@ -2,15 +2,42 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { createClient } from "../utils/supabase/client";
+import { createClient, createVerificationClient } from "../utils/supabase/client";
 import {
-  getAuthErrorMessage, isEmailNotConfirmed, isEmailOtp, normalizeEmail,
+  getAuthErrorMessage, isEmailNotConfirmed, isEmailOtp, isExistingAccountSignup, normalizeEmail,
   OTP_RESEND_SECONDS, parsePendingVerification, VERIFICATION_STORAGE_KEY,
   type PendingEmailVerification
 } from "../utils/auth-flow";
 
 type Mode = "login" | "signup" | "verify";
 type Notice = { text: string; error?: boolean } | null;
+
+function PasswordField({ value, onChange, autoComplete, disabled }: {
+  value: string;
+  onChange: (value: string) => void;
+  autoComplete: string;
+  disabled: boolean;
+}) {
+  const [visible, setVisible] = useState(false);
+  const toggleLabel = visible ? "Ẩn mật khẩu" : "Hiện mật khẩu";
+  return <div className="field-label">
+    <label htmlFor="auth-password">Mật khẩu</label>
+    <div className="password-field">
+      <input id="auth-password" required type={visible ? "text" : "password"} minLength={8} maxLength={128}
+        value={value} onChange={(event) => onChange(event.target.value)} className="form-input"
+        autoComplete={autoComplete} autoCapitalize="none" autoCorrect="off" spellCheck={false} disabled={disabled} />
+      <button type="button" className="password-toggle" aria-label={toggleLabel} title={toggleLabel}
+        disabled={disabled} onClick={() => setVisible((current) => !current)}>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" />
+          <circle cx="12" cy="12" r="3" />
+          {visible && <path d="m3 3 18 18" />}
+        </svg>
+      </button>
+    </div>
+  </div>;
+}
 
 export function AuthScreen({ onSession, theme, header }: {
   onSession: (session: Session) => void;
@@ -104,24 +131,32 @@ export function AuthScreen({ onSession, theme, header }: {
     const address = normalizeEmail(email);
     try {
       if (mode === "verify" && pending) {
-        const { data, error } = await supabase.auth.verifyOtp({
+        const verifier = createVerificationClient();
+        const { error } = await verifier.auth.verifyOtp({
           email: pending.email, token: otp, type: "email"
         });
         if (error) throw error;
-        if (!data.session) {
-          setNotice({ text: "Email đã được xác nhận. Hãy quay lại đăng nhập bằng mật khẩu của bạn." });
-          return;
-        }
-        finish(data.session);
+        // The email is confirmed; a failed cleanup of the unused session must not undo that.
+        await verifier.auth.signOut({ scope: "local" }).catch(() => undefined);
+        rememberVerification(null);
+        setMode("login");
+        setEmail(pending.email);
+        setPassword("");
+        setOtp("");
+        setNotice({ text: "Email đã được xác nhận. Hãy đăng nhập bằng mật khẩu của bạn." });
       } else if (mode === "signup") {
         const { data, error } = await supabase.auth.signUp({
           email: address, password, options: { data: { full_name: fullName.trim() } }
         });
         if (error) throw error;
         if (data.session) finish(data.session);
-        else {
+        else if (isExistingAccountSignup(data.user)) {
+          setMode("login");
+          setPassword("");
+          setNotice({ text: "Email này đã có tài khoản nên không có mã OTP nào được gửi. Hãy đăng nhập bằng mật khẩu của bạn." });
+        } else {
           openVerification(address, true);
-          setNotice({ text: "Yêu cầu đăng ký đã được tiếp nhận. Kiểm tra email và nhập mã xác nhận bên dưới. Nếu email đã có tài khoản, hãy quay lại đăng nhập." });
+          setNotice({ text: "Yêu cầu đăng ký đã được tiếp nhận. Kiểm tra email và nhập mã xác nhận bên dưới." });
         }
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({ email: address, password });
@@ -157,7 +192,7 @@ export function AuthScreen({ onSession, theme, header }: {
       const { error } = await createClient().auth.resend({ type: "signup", email: pending.email });
       if (error) throw error;
       setOtp("");
-      setNotice({ text: "Đã yêu cầu gửi lại mã. Hãy dùng mã trong email mới nhất và kiểm tra cả thư mục Spam." });
+      setNotice({ text: "Đã yêu cầu gửi lại mã. Hãy dùng mã trong email mới nhất và kiểm tra cả thư mục Spam. Thư mới chỉ được gửi khi email đã đăng ký và chưa xác nhận. Nếu vẫn không thấy thư, hãy đăng nhập hoặc đăng ký lại." });
       otpInput.current?.focus();
     } catch (error) {
       setNotice({ text: getAuthErrorMessage(error), error: true });
@@ -178,7 +213,7 @@ export function AuthScreen({ onSession, theme, header }: {
     <div className="auth-wrap">
       <section className="soft-card auth-card">
         <div className="auth-mark" aria-hidden="true">{mode === "verify" ? "✉" : "✦"}</div>
-        <p className="eyebrow">AI CAREER READY</p>
+        <p className="eyebrow">JOB READY</p>
         <h1>{mode === "verify" ? "Xác nhận email" : mode === "signup" ? "Tạo tài khoản" : "Chào mừng trở lại"}</h1>
         {mode === "verify" ? <p className="muted-copy">Nhập mã OTP từ email gửi tới <strong className="auth-email">{pending?.email}</strong></p>
           : <p className="muted-copy">Đối chiếu CV với công việc mơ ước và chuẩn bị phỏng vấn tự tin hơn.</p>}
@@ -195,14 +230,13 @@ export function AuthScreen({ onSession, theme, header }: {
               value={fullName} onChange={(event) => setFullName(event.target.value)} className="form-input" autoComplete="name" disabled={busy} /></label>}
             <label className="field-label">Email<input ref={emailInput} required type="email" maxLength={320}
               value={email} onChange={(event) => setEmail(event.target.value)} className="form-input" autoComplete="email" disabled={busy} /></label>
-            <label className="field-label">Mật khẩu<input required type="password" minLength={8} maxLength={128}
-              value={password} onChange={(event) => setPassword(event.target.value)} className="form-input"
-              autoComplete={mode === "signup" ? "new-password" : "current-password"} disabled={busy} /></label>
+            <PasswordField key={mode} value={password} onChange={setPassword} disabled={busy}
+              autoComplete={mode === "signup" ? "new-password" : "current-password"} />
           </>}
           {notice && <p role={notice.error ? "alert" : "status"}
             className={`notice ${notice.error ? "auth-error" : "notice-info"}`}>{notice.text}</p>}
           <button disabled={busy || (mode === "verify" && !isEmailOtp(otp))} className="primary-button">
-            {busy ? "Đang xử lý..." : mode === "verify" ? "Xác nhận và đăng nhập" : mode === "signup" ? "Đăng ký và nhận mã OTP" : "Đăng nhập"}
+            {busy ? "Đang xử lý..." : mode === "verify" ? "Xác nhận mã OTP" : mode === "signup" ? "Đăng ký và nhận mã OTP" : "Đăng nhập"}
           </button>
         </form>
         {mode === "verify" ? <div className="auth-verification-actions">

@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { config } from "./config";
 import { HttpError } from "./errors";
+import { startJobSyncSchedule } from "./jobs/schedule";
 import { apiRouter } from "./routes";
 import { supabase } from "./supabase";
 
@@ -72,4 +73,5 @@ app.use(errorHandler);
 
 app.listen(config.PORT, () => {
   console.log(`CV Fit API listening on port ${config.PORT}`);
+  startJobSyncSchedule();
 });

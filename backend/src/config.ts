@@ -24,6 +24,11 @@ const environmentSchema = z.object({
   GEMINI_STT_MODEL: z.string().default("gemini-3.5-transcribe"),
   GEMINI_TTS_MODEL: z.string().default("gemini-3.8-flash-lite-tts"),
   GEMINI_TTS_VOICE: z.string().default("Kore"),
+  // 0 turns automatic job sync off; `npm run jobs:sync` still works.
+  JOB_SYNC_INTERVAL_HOURS: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.coerce.number().min(0).max(168).default(12)
+  ),
   PAYOS_CLIENT_ID: optionalEnvString,
   PAYOS_API_KEY: optionalEnvString,
   PAYOS_CHECKSUM_KEY: optionalEnvString,

@@ -30,9 +30,9 @@ try {
 
   const tables = [
     ["users", "id"], ["cv_documents", "cv_data"],
-    ["analyses", "requirements,scoring_breakdown"], ["transactions", "id"],
+    ["analyses", "requirements,scoring_breakdown,job_id"], ["transactions", "id"],
     ["cv_evaluations", "id"], ["interview_sessions", "id"],
-    ["interview_answers", "session_id"]
+    ["interview_answers", "session_id,previous_attempts,follow_up"], ["job_postings", "id"]
   ];
   for (const [table, columns] of tables) {
     const response = await fetch(`${projectUrl}/rest/v1/${table}?select=${columns}&limit=0`, { headers });

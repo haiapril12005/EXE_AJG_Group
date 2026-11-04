@@ -27,6 +27,14 @@ export function isEmailNotConfirmed(error: unknown): boolean {
   return asRecord(error)?.code === "email_not_confirmed";
 }
 
+/**
+ * With email confirmation on, Supabase answers signUp for an already confirmed
+ * address with a fake user that has no identities, and sends no email.
+ */
+export function isExistingAccountSignup(user: { identities?: unknown[] } | null | undefined): boolean {
+  return Array.isArray(user?.identities) && user.identities.length === 0;
+}
+
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   otp_expired: "Mã xác nhận không đúng hoặc đã hết hạn. Hãy kiểm tra mã trong email mới nhất hoặc gửi lại mã.",
   over_email_send_rate_limit: "Dịch vụ gửi email đã đạt giới hạn. Vui lòng chờ một lúc rồi gửi lại mã.",
@@ -45,6 +53,11 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
 export function getAuthErrorMessage(error: unknown): string {
   const details = asRecord(error);
   const code = typeof details?.code === "string" ? details.code : "";
+  const message = typeof details?.message === "string" ? details.message : "";
+  // Supabase reports SMTP failures as a generic unexpected_failure.
+  if (/error sending .*email/i.test(message)) {
+    return "Hệ thống chưa gửi được email xác nhận, nên chưa có mã OTP nào được gửi. Vui lòng thử lại sau hoặc liên hệ nhóm hỗ trợ để kiểm tra cấu hình gửi thư.";
+  }
   if (Object.prototype.hasOwnProperty.call(AUTH_ERROR_MESSAGES, code)) {
     return AUTH_ERROR_MESSAGES[code];
   }
@@ -53,7 +66,6 @@ export function getAuthErrorMessage(error: unknown): string {
     return AUTH_ERROR_MESSAGES.over_request_rate_limit;
   }
 
-  const message = typeof details?.message === "string" ? details.message : "";
   if (
     details?.name === "AuthRetryableFetchError" ||
     details?.code === "NETWORK_ERROR" ||

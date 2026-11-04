@@ -13,6 +13,7 @@
     "test:auth": "node --import tsx --test frontend/test/auth-flow.test.ts",
     "test:auth-ui": "playwright test",
     "db:check": "node scripts/check-supabase.mjs",
+    "jobs:sync": "npm run jobs:sync --workspace backend --",
     "auth:check": "node scripts/check-auth-email.mjs"
   },
   "devDependencies": {

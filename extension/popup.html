@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Gửi JD sang Job Ready</title>
+    <style>
+      body { width: 280px; margin: 0; padding: 16px; color: #0f172a; font: 13px/1.5 Arial, sans-serif; }
+      h1 { margin: 0 0 6px; font-size: 15px; }
+      p { margin: 0 0 12px; color: #475569; }
+      button { width: 100%; padding: 10px; border: 0; border-radius: 999px; background: #10b981; color: #fff; font-weight: 700; cursor: pointer; }
+      button:disabled { opacity: .5; cursor: wait; }
+      #status { margin: 10px 0 0; color: #b91c1c; }
+      #status:empty { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Gửi JD đang xem</h1>
+    <p>Bôi đen phần mô tả công việc nếu trang có nhiều nội dung khác. JD chỉ nằm trong tab Job Ready của bạn.</p>
+    <button id="send" type="button">Gửi sang Job Ready</button>
+    <p id="status" role="status"></p>
+    <script src="popup.js"></script>
+  </body>
+</html>

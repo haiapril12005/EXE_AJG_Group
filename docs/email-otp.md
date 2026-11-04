@@ -1,6 +1,6 @@
 # Xác nhận đăng ký bằng OTP email
 
-Ứng dụng dùng Supabase Auth: người dùng đăng ký bằng email và mật khẩu, nhập mã OTP trong email để xác nhận rồi vào dự án. Mật khẩu vẫn được dùng cho những lần đăng nhập sau. Không cần thêm bảng OTP hay khóa gửi email vào frontend.
+Ứng dụng dùng Supabase Auth: người dùng đăng ký bằng email và mật khẩu, nhập mã OTP trong email để xác nhận, rồi được chuyển về trang đăng nhập và đăng nhập bằng mật khẩu. Không cần thêm bảng OTP hay khóa gửi email vào frontend.
 
 **Code và cấu hình gửi thư là hai phần riêng.** File HTML trong repo không tự cập nhật Supabase đang chạy trên cloud. Cần thực hiện các bước Dashboard bên dưới; việc nhận được thư còn phụ thuộc cấu hình SMTP và nhà cung cấp email.
 
@@ -18,7 +18,7 @@ Khi Confirm email tắt, Supabase có thể cấp session ngay sau đăng ký; n
 
 1. Mở **Authentication → Email → Templates** (ở một số phiên bản Dashboard có tên **Email Templates**).
 2. Chọn **Confirm sign up**.
-3. Đặt subject: `Mã xác nhận đăng ký AI Career Ready`.
+3. Đặt subject: `Mã xác nhận đăng ký Job Ready`.
 4. Copy toàn bộ [supabase/templates/confirm-signup.html](../supabase/templates/confirm-signup.html) vào phần nội dung HTML rồi **Save**.
 
 Phần `{{ .Token }}` được Supabase thay bằng mã xác nhận thật. Giữ nguyên cú pháp này. Mẫu **Confirm sign up** áp dụng cho đăng ký bằng mật khẩu; mẫu **Magic Link** dành cho luồng đăng nhập không mật khẩu. [Email Templates](https://supabase.com/docs/guides/auth/auth-email-templates)
@@ -47,7 +47,7 @@ Có thể dùng Gmail làm địa chỉ gửi cho demo nhỏ nếu tài khoản 
 | Trường | Giá trị |
 | --- | --- |
 | Sender email | Địa chỉ Gmail vừa tạo App Password |
-| Sender name | `AI Career Ready` |
+| Sender name | `Job Ready` |
 | Host | `smtp.gmail.com` |
 | Port | `587` (TLS/STARTTLS) |
 | Username | Đầy đủ địa chỉ Gmail, trùng Sender email |
@@ -75,28 +75,30 @@ await supabase.auth.signUp({
   options: { data: { full_name: fullName } },
 });
 
-// Xác nhận mã và nhận session từ Supabase.
-await supabase.auth.verifyOtp({ email, token, type: "email" });
+// Xác nhận mã bằng client riêng không lưu session, nên người dùng phải đăng nhập sau đó.
+await createVerificationClient().auth.verifyOtp({ email, token, type: "email" });
 
 // Gửi lại thư xác nhận tài khoản đang chờ.
 await supabase.auth.resend({ email, type: "signup" });
 ```
 
-`verifyOtp` dùng `type: "email"`; `resend` dùng `type: "signup"`. Tài khoản chưa xác nhận khi đăng nhập cần quay lại màn hình nhập OTP hoặc gửi lại mã, không tạo tài khoản mới hay bỏ qua xác nhận bằng admin API. [verifyOtp](https://supabase.com/docs/reference/javascript/auth-verifyotp), [resend](https://supabase.com/docs/reference/javascript/auth-resend)
+`resend` cũng trả thành công mà không gửi thư nếu email đã xác nhận hoặc chưa có tài khoản. `verifyOtp` dùng `type: "email"`; `resend` dùng `type: "signup"`. Tài khoản chưa xác nhận khi đăng nhập cần quay lại màn hình nhập OTP hoặc gửi lại mã, không tạo tài khoản mới hay bỏ qua xác nhận bằng admin API. [verifyOtp](https://supabase.com/docs/reference/javascript/auth-verifyotp), [resend](https://supabase.com/docs/reference/javascript/auth-resend)
 
 ## 6. Dùng thử và tìm lỗi
 
 1. Mở `http://localhost:3000`, đăng ký bằng email bạn có thể mở hộp thư.
 2. Nhận thư mới, nhập đầy đủ mã và xác nhận. Nếu cần, kiểm tra Spam/Junk.
 3. Thử mã sai hoặc hết hạn: ứng dụng phải giữ người dùng ở bước xác nhận và cho gửi lại.
-4. Sau khi xác nhận thành công, đăng xuất rồi đăng nhập bằng email và mật khẩu vừa tạo.
+4. Sau khi xác nhận thành công, ứng dụng về trang đăng nhập; đăng nhập bằng email và mật khẩu vừa tạo.
 5. Xem **Authentication → Users** để kiểm tra trạng thái xác nhận; xem **Authentication → Logs** khi gửi thư thất bại.
 
 | Hiện tượng / mã lỗi | Cách xử lý |
 | --- | --- |
 | `email_address_not_authorized` | Cấu hình Custom SMTP cho email ngoài organization. |
+| HTTP 500 `Error sending confirmation email` | Supabase không gửi được thư qua SMTP và không tạo user. Xem lỗi chi tiết trong **Authentication → Logs**; kiểm tra host, port, username, password và sender đã được nhà cung cấp xác minh. |
+| Đăng ký email đã xác nhận | Supabase trả thành công giả (`identities` rỗng) và không gửi thư. Ứng dụng chuyển về đăng nhập; muốn thử OTP cần dùng email chưa đăng ký. |
 | `over_email_send_rate_limit` / HTTP 429 | Đợi hết hạn mức; kiểm tra Rate Limits và giới hạn nhà cung cấp SMTP. |
-| Thư vẫn chỉ có nút xác nhận | Kiểm tra đã lưu đúng mẫu **Confirm sign up** trong đúng project; yêu cầu thư mới. |
+| Thư vẫn chỉ có nút xác nhận | Kiểm tra đã lưu đúng mẫu **Confirm sign up** trong đúng project; yêu cầu thư mới. Bấm link trong mẫu mặc định sẽ xác nhận tài khoản mà không qua OTP. |
 | `otp_expired` / mã không hợp lệ | Kiểm tra email đã nhập, dùng mã trong thư mới nhất hoặc yêu cầu gửi lại. |
 | Không thấy thư dù API không báo lỗi | Kiểm tra Spam/Junk, Auth Logs và nhật ký SMTP; API chấp nhận yêu cầu không bảo đảm thư đã tới hộp thư. |
 

@@ -2,7 +2,7 @@ import { Router, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
 import { analyzeCVvsJD, evaluateInterviewAnswer, generateCvQualityFeedback, generateMockQuestions, rewriteSection, rewriteSectionSchema, structureCV } from "./aiService";
-import { cvDataSchema, cvDataToText, emptyCvData, extractContacts, maskText, type CvData } from "./cvData";
+import { cvDataSchema, cvDataToText, emptyCvData, extractContacts, extractLinks, maskText, stripNul, type CvData } from "./cvData";
 import { inspectCvQuality, scoreQualityIssues } from "./cvQuality";
 import { requireAuth, type AuthenticatedRequest } from "./auth";
 import { config } from "./config";
@@ -11,8 +11,31 @@ import { createPayOSPayment, verifyPayOSWebhook } from "./payments";
 import { authClient, supabase } from "./supabase";
 import { parseBody } from "./validation";
 import { synthesizeQuestion, transcribeAudio } from "./speech";
+import { normalizeEvidence } from "./scoring";
+import { followUpQuestionOf, interviewQuestionsSchema, MAX_QUESTIONS, overallScore, withPreviousAttempt } from "./interview";
 
 const router = Router();
+
+const LIST_PAGE_SIZE = 20;
+const listPageSchema = z.object({ page: z.coerce.number().int().min(1).max(1000).default(1) });
+
+/** History lists page in 20s; `range` is inclusive. */
+function listPage(query: unknown) {
+  const parsed = listPageSchema.safeParse(query);
+  if (!parsed.success) throw new HttpError(400, "Invalid page");
+  const from = (parsed.data.page - 1) * LIST_PAGE_SIZE;
+  return { page: parsed.data.page, from, to: from + LIST_PAGE_SIZE - 1 };
+}
+
+/** PGRST103 means the page is past the last row, which is simply an empty page. */
+function pageError(error: { code?: string } | null) {
+  return error && error.code !== "PGRST103" ? error : null;
+}
+
+/** The embedded row of a many-to-one join; PostgREST may return it as an object or a one-item list. */
+function embedded<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
 const paymentsEnabled = Boolean(config.PAYOS_CLIENT_ID && config.PAYOS_API_KEY && config.PAYOS_CHECKSUM_KEY);
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -117,7 +140,7 @@ router.post("/cv/upload", requireAuth, upload.single("file"), async (req: Authen
     } catch {
       throw new HttpError(422, "Could not read this PDF. Please export it again as a text-based PDF.");
     }
-    const rawText = parsed.text.trim();
+    const rawText = stripNul(parsed.text).trim();
     if (rawText.length < 40) {
       throw new HttpError(422, "Could not extract readable text. Please use a text-based PDF CV.");
     }
@@ -169,14 +192,31 @@ router.post("/cv/create", requireAuth, async (req: AuthenticatedRequest, res) =>
 
 router.get("/cv", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const { data, error } = await supabase
+    const { page, from, to } = listPage(req.query);
+    const { data, error, count } = await supabase
       .from("cv_documents")
-      .select("id,original_name,created_at")
+      .select("id,original_name,created_at", { count: "exact" })
       .eq("user_id", userId(req))
       .order("created_at", { ascending: false })
-      .limit(20);
+      .order("id")
+      .range(from, to);
+    if (pageError(error)) throw error;
+    res.json({ cvs: data ?? [], total: count ?? 0, page, page_size: LIST_PAGE_SIZE });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Removing a CV also removes its analyses, quality checks and interview sessions (ON DELETE CASCADE). */
+router.delete("/cv/:cvId", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const cvId = z.string().uuid().safeParse(req.params.cvId);
+    if (!cvId.success) throw new HttpError(400, "Invalid CV ID");
+    const { data, error } = await supabase.from("cv_documents").delete()
+      .eq("id", cvId.data).eq("user_id", userId(req)).select("id").maybeSingle();
     if (error) throw error;
-    res.json({ cvs: data });
+    if (!data) throw new HttpError(404, "CV not found");
+    res.json({ deleted: true });
   } catch (error) {
     sendError(res, error);
   }
@@ -196,18 +236,25 @@ router.get("/cv/:cvId", requireAuth, async (req: AuthenticatedRequest, res) => {
     if (result.error) throw result.error;
     if (!result.data) throw new HttpError(404, "CV not found");
     let cvData: CvData | null = result.data.cv_data ? cvDataSchema.parse(result.data.cv_data) : null;
+    let structured = true;
     if (!cvData) {
+      const maskedText = maskText(result.data.masked_text);
       try {
-        cvData = await structureCV(result.data.masked_text);
+        cvData = await structureCV(maskedText);
       } catch (error) {
         console.error("CV structuring failed, using fallback", error);
-        cvData = { ...emptyCvData(), summary: result.data.masked_text.slice(0, 3000) };
+        structured = false;
+        cvData = { ...emptyCvData(), summary: maskedText.slice(0, 3000) };
       }
       cvData.personal_info = { ...cvData.personal_info, ...extractContacts(result.data.raw_text) };
-      const saved = await supabase.from("cv_documents").update({ cv_data: cvData }).eq("id", cvId.data).eq("user_id", userId(req));
-      if (saved.error && !isMissingCvDataColumn(saved.error)) console.error("Failed to store cv_data", saved.error);
+      cvData.links = extractLinks(result.data.raw_text);
+      // The fallback is not stored, so opening the CV again retries structuring.
+      if (structured) {
+        const saved = await supabase.from("cv_documents").update({ cv_data: cvData }).eq("id", cvId.data).eq("user_id", userId(req));
+        if (saved.error && !isMissingCvDataColumn(saved.error)) console.error("Failed to store cv_data", saved.error);
+      }
     }
-    res.json({ cv_id: result.data.id, original_name: result.data.original_name, cv_data: cvData });
+    res.json({ cv_id: result.data.id, original_name: result.data.original_name, cv_data: cvData, structured });
   } catch (error) {
     sendError(res, error);
   }
@@ -251,14 +298,15 @@ router.post("/cv/:cvId/evaluate", requireAuth, async (req: AuthenticatedRequest,
       .eq("id", cvId.data).eq("user_id", ownerId).maybeSingle();
     if (error) throw error;
     if (!row) throw new HttpError(404, "CV not found");
+    const maskedText = maskText(row.masked_text);
     const parsed = cvDataSchema.safeParse(row.cv_data);
     let cv = parsed.success ? parsed.data : null;
     if (!cv) {
       try {
-        cv = await structureCV(row.masked_text);
+        cv = await structureCV(maskedText);
       } catch (error) {
         console.error("CV structuring unavailable during quality check", error);
-        cv = { ...emptyCvData(), summary: row.masked_text.slice(0, 3000) };
+        cv = { ...emptyCvData(), summary: maskedText.slice(0, 3000) };
       }
     }
     if (!parsed.success) cv.personal_info = { ...cv.personal_info, ...extractContacts(row.raw_text) };
@@ -266,7 +314,7 @@ router.post("/cv/:cvId/evaluate", requireAuth, async (req: AuthenticatedRequest,
     let aiIssues: Awaited<ReturnType<typeof generateCvQualityFeedback>> = [];
     let aiAvailable = true;
     try {
-      aiIssues = await generateCvQualityFeedback(row.masked_text);
+      aiIssues = await generateCvQualityFeedback(maskedText);
     } catch (error) {
       console.error("AI quality feedback unavailable", error);
       aiAvailable = false;
@@ -301,6 +349,31 @@ router.get("/cv/:cvId/evaluations", requireAuth, async (req: AuthenticatedReques
   }
 });
 
+router.get("/evaluations", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const { page, from, to } = listPage(req.query);
+    const base = "id,cv_id,quality_score,created_at";
+    const list = (columns: string) => supabase.from("cv_evaluations").select(columns, { count: "exact" })
+      .eq("user_id", userId(req)).order("created_at", { ascending: false }).order("id").range(from, to);
+    let result = await list(`${base},cv_documents!cv_evaluations_cv_id_fkey(original_name)`);
+    if (result.error && result.error.code !== "PGRST103") {
+      console.warn(`Listing CV evaluations without CV names: ${result.error.message}`);
+      result = await list(base);
+    }
+    if (pageError(result.error)) throw result.error;
+    type Row = { id: string; cv_id: string; quality_score: number; created_at: string;
+      cv_documents?: { original_name: string } | { original_name: string }[] | null };
+    res.json({
+      evaluations: ((result.data ?? []) as unknown as Row[]).map(({ cv_documents, ...item }) => ({
+        ...item, cv_name: embedded(cv_documents)?.original_name ?? null
+      })),
+      total: result.count ?? 0, page, page_size: LIST_PAGE_SIZE
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 router.post("/ai/rewrite-section", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const body = parseBody(rewriteSectionSchema, req.body);
@@ -310,10 +383,69 @@ router.post("/ai/rewrite-section", requireAuth, async (req: AuthenticatedRequest
   }
 });
 
+const JOB_PAGE_SIZE = 20;
+const jobListSchema = z.object({
+  q: z.string().trim().max(100).optional(),
+  city: z.string().trim().max(40).optional(),
+  page: z.coerce.number().int().min(1).max(1000).default(1)
+});
+
+function jobStoreError(error: { code?: string }) {
+  return error.code === "PGRST205"
+    ? new HttpError(503, "Kho việc làm chưa sẵn sàng. Hãy chạy migration 004_job_postings.sql rồi chạy npm run jobs:sync.")
+    : error;
+}
+
+async function getJobPosting(id: string) {
+  const { data, error } = await supabase.from("job_postings")
+    .select("id,company,title,location,city,url,posted_at,description").eq("id", id).maybeSingle();
+  if (error) throw jobStoreError(error);
+  if (!data) throw new HttpError(404, "Job posting not found");
+  return data;
+}
+
+router.get("/jobs", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const parsed = jobListSchema.safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, "Invalid job filters");
+    const { q, city, page } = parsed.data;
+    let query = supabase.from("job_postings")
+      .select("id,company,title,location,city,url,posted_at", { count: "exact" })
+      .eq("is_active", true);
+    // These characters are syntax inside PostgREST's or() filter. Each word must appear in the
+    // title, company or description, so "backend typescript" finds postings asking for both.
+    const words = (q ?? "").replace(/[%_,()*\\"':]/g, " ").split(/\s+/u).filter(Boolean).slice(0, 5);
+    for (const word of words) {
+      query = query.or(`title.ilike.%${word}%,company.ilike.%${word}%,description.ilike.%${word}%`);
+    }
+    if (city) query = query.eq("city", city);
+    const from = (page - 1) * JOB_PAGE_SIZE;
+    const { data, error, count } = await query
+      .order("posted_at", { ascending: false, nullsFirst: false }).order("id")
+      .range(from, from + JOB_PAGE_SIZE - 1);
+    // PGRST103: the requested page is past the last result.
+    if (error && error.code !== "PGRST103") throw jobStoreError(error);
+    res.json({ jobs: data ?? [], total: count ?? 0, page, page_size: JOB_PAGE_SIZE });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/jobs/:jobId", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const jobId = z.string().uuid().safeParse(req.params.jobId);
+    if (!jobId.success) throw new HttpError(400, "Invalid job ID");
+    res.json({ job: await getJobPosting(jobId.data) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 const analysisSchema = z.object({
   cv_id: z.string().uuid(),
-  jd_text: z.string().trim().min(50).max(20_000)
-});
+  jd_text: z.string().trim().min(50).max(20_000).optional(),
+  job_id: z.string().uuid().optional()
+}).refine((body) => body.jd_text || body.job_id, { message: "Provide a job description" });
 
 router.post("/analyze", requireAuth, async (req: AuthenticatedRequest, res) => {
   const ownerId = userId(req);
@@ -327,6 +459,16 @@ router.post("/analyze", requireAuth, async (req: AuthenticatedRequest, res) => {
       .eq("user_id", ownerId)
       .single();
     if (cvError || !cv) throw new HttpError(404, "CV not found");
+    const job = body.job_id
+      ? await getJobPosting(body.job_id).catch((error: unknown) => {
+        // A pasted JD can still be analyzed after its posting is gone.
+        if (body.jd_text && error instanceof HttpError && error.status === 404) return null;
+        throw error;
+      })
+      : null;
+    const jdText = body.jd_text ?? job?.description ?? "";
+    // An edited JD no longer describes the posting, so the report is not linked to it.
+    const linkedJob = job && normalizeEvidence(jdText) === normalizeEvidence(job.description) ? job : null;
 
     let remainingCredits: number | null = null;
     if (paymentsEnabled) {
@@ -337,14 +479,15 @@ router.post("/analyze", requireAuth, async (req: AuthenticatedRequest, res) => {
       creditConsumed = true;
     }
 
-    const analysis = await analyzeCVvsJD(cv.masked_text, body.jd_text);
+    const analysis = await analyzeCVvsJD(maskText(cv.masked_text), jdText);
     const premiumUnlocked = true;
     const { data: saved, error: saveError } = await supabase
       .from("analyses")
       .insert({
         user_id: ownerId,
         cv_id: body.cv_id,
-        jd_text: body.jd_text,
+        jd_text: jdText,
+        ...(linkedJob ? { job_id: linkedJob.id } : {}),
         rci_score: analysis.rci_score,
         layer_1_skills: analysis.layer_1_skills,
         layer_2_projects: analysis.layer_2_projects,
@@ -360,6 +503,7 @@ router.post("/analyze", requireAuth, async (req: AuthenticatedRequest, res) => {
 
     res.json({
       analysis_id: saved.id,
+      job_id: linkedJob?.id ?? null,
       ...analysis,
       layer_4_mock: premiumUnlocked ? analysis.layer_4_mock : null,
       is_premium_unlocked: premiumUnlocked,
@@ -374,13 +518,42 @@ router.post("/analyze", requireAuth, async (req: AuthenticatedRequest, res) => {
   }
 });
 
+type AnalysisListRow = {
+  id: string; cv_id: string; job_id?: string | null; jd_text: string; rci_score: number; created_at: string;
+  cv_documents: { original_name: string } | { original_name: string }[] | null;
+  job_postings?: { title: string; company: string } | { title: string; company: string }[] | null;
+};
+
 router.get("/analyses", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const { data, error } = await supabase.from("analyses")
-      .select("id,cv_id,jd_text,rci_score,created_at")
-      .eq("user_id", userId(req)).order("created_at", { ascending: false }).limit(20);
-    if (error) throw error;
-    res.json({ analyses: data });
+    const { page, from, to } = listPage(req.query);
+    const list = (columns: string) => supabase.from("analyses").select(columns, { count: "exact" })
+      .eq("user_id", userId(req)).order("created_at", { ascending: false }).order("id").range(from, to);
+    // analyses reaches cv_documents directly and through interview_sessions, so the joins name their
+    // foreign keys. Without migration 004 there is no job link; the list then loads without it.
+    const base = "id,cv_id,jd_text,rci_score,created_at";
+    const withCv = `${base},cv_documents!analyses_cv_id_fkey(original_name)`;
+    let result = await list(`${withCv},job_id,job_postings!analyses_job_id_fkey(title,company)`);
+    for (const fallback of [withCv, base]) {
+      if (!result.error || result.error.code === "PGRST103") break;
+      console.warn(`Listing analyses with fewer joins: ${result.error.message}`);
+      result = await list(fallback);
+    }
+    if (pageError(result.error)) throw result.error;
+    const rows = (result.data ?? []) as unknown as AnalysisListRow[];
+    res.json({
+      analyses: rows.map((row) => {
+        const job = embedded(row.job_postings);
+        return {
+          id: row.id, cv_id: row.cv_id, rci_score: row.rci_score, created_at: row.created_at,
+          job_id: row.job_id ?? null,
+          jd_preview: row.jd_text.slice(0, 120),
+          cv_name: embedded(row.cv_documents)?.original_name ?? null,
+          job: job ? { title: job.title, company: job.company } : null
+        };
+      }),
+      total: result.count ?? 0, page, page_size: LIST_PAGE_SIZE
+    });
   } catch (error) {
     sendError(res, error);
   }
@@ -434,7 +607,7 @@ router.post("/analyses/:analysisId/unlock", requireAuth, async (req: Authenticat
       .eq("user_id", ownerId)
       .single();
     if (cvError || !cv) throw new HttpError(404, "CV not found");
-    const questions = await generateMockQuestions(cv.masked_text, analysis.jd_text);
+    const questions = await generateMockQuestions(maskText(cv.masked_text), analysis.jd_text);
     if (!paymentsEnabled) {
       const { error: updateError } = await supabase.from("analyses")
         .update({ layer_4_mock: questions, is_premium_unlocked: true })
@@ -563,7 +736,27 @@ router.get("/payment/:orderCode", requireAuth, async (req: AuthenticatedRequest,
   }
 });
 
-const interviewQuestionsSchema = z.array(z.string().trim().min(10).max(1000)).length(3);
+const startInterviewSchema = z.union([
+  z.object({ analysis_id: z.string().uuid() }),
+  z.object({
+    cv_id: z.string().uuid(),
+    jd_text: z.string().trim().min(50).max(20_000),
+    question_count: z.union([z.literal(3), z.literal(5)]).default(3)
+  })
+]);
+
+const answerTextSchema = z.string().trim().min(20).max(5000);
+const MIGRATION_005 = "005_interview_practice.sql";
+let interviewPracticeReady = false;
+
+/** Migration 005 adds answer history, follow-ups and longer sessions; until it runs those stay off. */
+async function hasInterviewPractice(): Promise<boolean> {
+  if (interviewPracticeReady) return true;
+  const { error } = await supabase.from("interview_answers").select("previous_attempts,follow_up").limit(0);
+  if (error && !/previous_attempts|follow_up|column/i.test(error.message)) throw error;
+  interviewPracticeReady = !error;
+  return interviewPracticeReady;
+}
 
 async function getInterview(sessionId: string, ownerId: string) {
   const parsed = z.string().uuid().safeParse(sessionId);
@@ -575,17 +768,54 @@ async function getInterview(sessionId: string, ownerId: string) {
   return { ...data, questions: interviewQuestionsSchema.parse(data.questions) };
 }
 
+function questionIndex(value: unknown, total: number): number {
+  const index = z.coerce.number().int().min(0).max(total - 1).safeParse(value);
+  if (!index.success) throw new HttpError(400, "Invalid question index");
+  return index.data;
+}
+
+async function cvTextFor(cvId: string, ownerId: string): Promise<string> {
+  const { data: cv, error } = await supabase.from("cv_documents")
+    .select("masked_text").eq("id", cvId).eq("user_id", ownerId).maybeSingle();
+  if (error) throw error;
+  if (!cv) throw new HttpError(404, "CV not found");
+  return maskText(cv.masked_text);
+}
+
 router.post("/interviews", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const body = parseBody(z.object({ analysis_id: z.string().uuid() }), req.body);
+    const body = parseBody(startInterviewSchema, req.body);
     const ownerId = userId(req);
+    if ("cv_id" in body) {
+      if (body.question_count > 3 && !(await hasInterviewPractice())) {
+        throw new HttpError(503, `Luyện ${body.question_count} câu cần chạy migration ${MIGRATION_005} trước.`);
+      }
+      const questions = await generateMockQuestions(await cvTextFor(body.cv_id, ownerId), body.jd_text, body.question_count);
+      const { data, error: saveError } = await supabase.from("interview_sessions")
+        .insert({ user_id: ownerId, cv_id: body.cv_id, jd_text: body.jd_text, questions })
+        .select("id,questions,status,created_at").single();
+      if (saveError?.code === "23502") {
+        throw new HttpError(503, "Phỏng vấn nhanh cần chạy migration 004_job_postings.sql trước.");
+      }
+      if (saveError) throw saveError;
+      res.status(201).json({ session: data });
+      return;
+    }
     const { data: analysis, error } = await supabase.from("analyses")
       .select("id,cv_id,jd_text,layer_4_mock").eq("id", body.analysis_id)
       .eq("user_id", ownerId).maybeSingle();
     if (error) throw error;
     if (!analysis) throw new HttpError(404, "Analysis not found");
     const parsed = interviewQuestionsSchema.safeParse(analysis.layer_4_mock);
-    if (!parsed.success) throw new HttpError(402, "Unlock interview questions before starting practice");
+    if (!parsed.success) throw new HttpError(402, "Hãy tạo câu hỏi phỏng vấn trong báo cáo trước khi bắt đầu luyện.");
+    const { data: existing, error: existingError } = await supabase.from("interview_sessions")
+      .select("id,questions,status,created_at").eq("analysis_id", analysis.id).eq("user_id", ownerId)
+      .eq("status", "IN_PROGRESS").order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (existingError) throw existingError;
+    if (existing) {
+      res.json({ session: existing });
+      return;
+    }
     const { data, error: saveError } = await supabase.from("interview_sessions")
       .insert({ user_id: ownerId, analysis_id: analysis.id, cv_id: analysis.cv_id,
         jd_text: analysis.jd_text, questions: parsed.data })
@@ -597,13 +827,36 @@ router.post("/interviews", requireAuth, async (req: AuthenticatedRequest, res) =
   }
 });
 
+type InterviewListRow = {
+  id: string; analysis_id: string | null; status: string; created_at: string; completed_at: string | null;
+  jd_text: string; questions: unknown[]; interview_answers: { evaluation: unknown }[];
+  cv_documents?: { original_name: string } | { original_name: string }[] | null;
+};
+
 router.get("/interviews", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const { data, error } = await supabase.from("interview_sessions")
-      .select("id,analysis_id,status,created_at,completed_at")
-      .eq("user_id", userId(req)).order("created_at", { ascending: false }).limit(20);
-    if (error) throw error;
-    res.json({ sessions: data });
+    const { page, from, to } = listPage(req.query);
+    const base = "id,analysis_id,status,created_at,completed_at,jd_text,questions,interview_answers(evaluation)";
+    const list = (columns: string) => supabase.from("interview_sessions").select(columns, { count: "exact" })
+      .eq("user_id", userId(req)).order("created_at", { ascending: false }).order("id").range(from, to);
+    let result = await list(`${base},cv_documents!interview_sessions_cv_id_fkey(original_name)`);
+    if (result.error && result.error.code !== "PGRST103") {
+      console.warn(`Listing interviews without CV names: ${result.error.message}`);
+      result = await list(base);
+    }
+    if (pageError(result.error)) throw result.error;
+    const rows = (result.data ?? []) as unknown as InterviewListRow[];
+    res.json({
+      sessions: rows.map(({ jd_text, questions, interview_answers, cv_documents, ...session }) => ({
+        ...session,
+        cv_name: embedded(cv_documents)?.original_name ?? null,
+        jd_preview: jd_text.slice(0, 90),
+        answered: interview_answers.length,
+        total: questions.length,
+        overall_score: overallScore(interview_answers, questions.length)
+      })),
+      total: result.count ?? 0, page, page_size: LIST_PAGE_SIZE
+    });
   } catch (error) {
     sendError(res, error);
   }
@@ -612,16 +865,16 @@ router.get("/interviews", requireAuth, async (req: AuthenticatedRequest, res) =>
 router.get("/interviews/:sessionId", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const session = await getInterview(req.params.sessionId, userId(req));
+    const columns = await hasInterviewPractice()
+      ? "question_index,answer_text,evaluation,created_at,previous_attempts,follow_up"
+      : "question_index,answer_text,evaluation,created_at";
     const { data: answers, error } = await supabase.from("interview_answers")
-      .select("question_index,answer_text,evaluation,created_at")
-      .eq("session_id", session.id).order("question_index", { ascending: true });
+      .select(columns).eq("session_id", session.id).order("question_index", { ascending: true });
     if (error) throw error;
-    const overall_score = answers.length === session.questions.length
-      ? Math.round(answers.reduce((sum, answer) => sum + Number(answer.evaluation.score || 0), 0) / answers.length)
-      : null;
+    const rows = (answers ?? []) as unknown as { evaluation: unknown }[];
     res.json({ session: { id: session.id, analysis_id: session.analysis_id,
       questions: session.questions, status: session.status, created_at: session.created_at,
-      answers, overall_score } });
+      answers: rows, overall_score: overallScore(rows, session.questions.length) } });
   } catch (error) {
     sendError(res, error);
   }
@@ -630,9 +883,17 @@ router.get("/interviews/:sessionId", requireAuth, async (req: AuthenticatedReque
 router.get("/interviews/:sessionId/questions/:index/audio", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const session = await getInterview(req.params.sessionId, userId(req));
-    const index = z.coerce.number().int().min(0).max(2).safeParse(req.params.index);
-    if (!index.success) throw new HttpError(400, "Invalid question index");
-    const audio = await synthesizeQuestion(session.questions[index.data]);
+    const index = questionIndex(req.params.index, session.questions.length);
+    let text = session.questions[index];
+    if (req.query.follow_up === "1") {
+      const { data, error } = await supabase.from("interview_answers").select("evaluation")
+        .eq("session_id", session.id).eq("question_index", index).maybeSingle();
+      if (error) throw error;
+      const followUp = followUpQuestionOf(data?.evaluation);
+      if (!followUp) throw new HttpError(404, "Câu hỏi nối tiếp không tồn tại");
+      text = followUp;
+    }
+    const audio = await synthesizeQuestion(text);
     res.setHeader("Content-Type", "audio/wav");
     res.setHeader("Cache-Control", "private, max-age=600");
     res.send(audio);
@@ -655,37 +916,80 @@ router.post("/interviews/:sessionId/transcribe", requireAuth, audioUpload.single
 router.post("/interviews/:sessionId/answers", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const body = parseBody(z.object({
-      question_index: z.number().int().min(0).max(2),
-      answer_text: z.string().trim().min(20).max(5000)
+      question_index: z.number().int().min(0).max(MAX_QUESTIONS - 1),
+      answer_text: answerTextSchema
     }), req.body);
     const ownerId = userId(req);
     const session = await getInterview(req.params.sessionId, ownerId);
-    if (session.status === "COMPLETED") throw new HttpError(409, "Interview is already completed");
-    const { data: cv, error: cvError } = await supabase.from("cv_documents")
-      .select("masked_text").eq("id", session.cv_id).eq("user_id", ownerId).maybeSingle();
-    if (cvError) throw cvError;
-    if (!cv) throw new HttpError(404, "CV not found");
-    const evaluation = await evaluateInterviewAnswer({ question: session.questions[body.question_index],
-      answer: body.answer_text, cvText: cv.masked_text, jdText: session.jd_text });
+    const index = questionIndex(body.question_index, session.questions.length);
+    const evaluation = await evaluateInterviewAnswer({ question: session.questions[index],
+      answer: body.answer_text, cvText: await cvTextFor(session.cv_id, ownerId), jdText: session.jd_text });
+    let history = {};
+    if (await hasInterviewPractice()) {
+      const { data: existing, error } = await supabase.from("interview_answers")
+        .select("answer_text,evaluation,created_at,previous_attempts,follow_up")
+        .eq("session_id", session.id).eq("question_index", index).maybeSingle();
+      if (error) throw error;
+      // Answering again keeps the earlier attempt, so progress on the same question stays visible.
+      history = {
+        follow_up: null,
+        previous_attempts: existing
+          ? withPreviousAttempt(existing.previous_attempts, { answer_text: existing.answer_text,
+            evaluation: existing.evaluation, follow_up: existing.follow_up ?? null, created_at: existing.created_at })
+          : []
+      };
+    }
     const { error: saveError } = await supabase.from("interview_answers").upsert({
-      session_id: session.id, question_index: body.question_index,
-      answer_text: body.answer_text, evaluation
+      session_id: session.id, question_index: index, answer_text: body.answer_text, evaluation,
+      created_at: new Date().toISOString(), ...history
     }, { onConflict: "session_id,question_index" });
+    if (saveError?.code === "23514") {
+      throw new HttpError(503, `Phiên có hơn 3 câu hỏi cần chạy migration ${MIGRATION_005} trước.`);
+    }
     if (saveError) throw saveError;
     const { data: answers, error: countError } = await supabase.from("interview_answers")
       .select("evaluation").eq("session_id", session.id);
     if (countError) throw countError;
     const completed = answers.length === session.questions.length;
-    if (completed) {
+    if (completed && session.status !== "COMPLETED") {
       const { error: completeError } = await supabase.from("interview_sessions")
         .update({ status: "COMPLETED", completed_at: new Date().toISOString() })
         .eq("id", session.id).eq("user_id", ownerId);
       if (completeError) throw completeError;
     }
-    const overall_score = completed
-      ? Math.round(answers.reduce((sum, item) => sum + Number(item.evaluation.score || 0), 0) / answers.length)
-      : null;
-    res.json({ evaluation, completed, overall_score });
+    res.json({ evaluation, completed, overall_score: overallScore(answers, session.questions.length) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.post("/interviews/:sessionId/answers/:index/follow-up", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const body = parseBody(z.object({ answer_text: answerTextSchema }), req.body);
+    const ownerId = userId(req);
+    const session = await getInterview(req.params.sessionId, ownerId);
+    const index = questionIndex(req.params.index, session.questions.length);
+    if (!(await hasInterviewPractice())) {
+      throw new HttpError(503, `Trả lời câu hỏi nối tiếp cần chạy migration ${MIGRATION_005} trước.`);
+    }
+    const { data: main, error } = await supabase.from("interview_answers")
+      .select("answer_text,evaluation,created_at").eq("session_id", session.id).eq("question_index", index).maybeSingle();
+    if (error) throw error;
+    const question = followUpQuestionOf(main?.evaluation);
+    if (!main || !question) throw new HttpError(404, "Câu hỏi nối tiếp không tồn tại");
+    const evaluation = await evaluateInterviewAnswer({ question, answer: body.answer_text,
+      cvText: await cvTextFor(session.cv_id, ownerId), jdText: session.jd_text,
+      previous_exchange: { question: session.questions[index], answer: main.answer_text } });
+    // One follow-up per answer: the follow-up's own suggested question is not kept.
+    const followUp = { question, answer_text: body.answer_text,
+      evaluation: { ...evaluation, follow_up_question: null }, created_at: new Date().toISOString() };
+    // Matching created_at makes sure the main answer was not replaced while this one was graded.
+    const { data: saved, error: saveError } = await supabase.from("interview_answers").update({ follow_up: followUp })
+      .eq("session_id", session.id).eq("question_index", index).eq("created_at", main.created_at)
+      .select("question_index").maybeSingle();
+    if (saveError) throw saveError;
+    if (!saved) throw new HttpError(409, "Câu trả lời chính vừa thay đổi. Hãy tải lại trang rồi trả lời câu hỏi nối tiếp mới.");
+    res.json({ follow_up: followUp });
   } catch (error) {
     sendError(res, error);
   }

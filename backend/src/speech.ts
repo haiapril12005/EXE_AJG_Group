@@ -1,6 +1,7 @@
 import { config } from "./config";
 import { HttpError } from "./errors";
 import { getGemini } from "./aiService";
+import { LruCache } from "./cache";
 
 export async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string> {
   const client = await getGemini();
@@ -35,7 +36,21 @@ export async function transcribeAudio(buffer: Buffer, mimeType: string): Promise
   }
 }
 
-export async function synthesizeQuestion(text: string): Promise<Buffer> {
+// About 40 short questions; each clip is a few hundred KB of WAV.
+const questionAudio = new LruCache<string, Promise<Buffer>>(40);
+
+/** Replaying a question reuses its clip, and two requests for the same text share one synthesis. */
+export function synthesizeQuestion(text: string): Promise<Buffer> {
+  const key = `${config.GEMINI_TTS_MODEL}|${config.GEMINI_TTS_VOICE}|${text}`;
+  const cached = questionAudio.get(key);
+  if (cached) return cached;
+  const pending = synthesize(text);
+  questionAudio.set(key, pending);
+  pending.catch(() => questionAudio.delete(key));
+  return pending;
+}
+
+async function synthesize(text: string): Promise<Buffer> {
   const client = await getGemini();
   const result = await client.interactions.create({
     model: config.GEMINI_TTS_MODEL,

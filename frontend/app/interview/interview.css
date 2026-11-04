@@ -1,22 +1,30 @@
-.interview-shell { max-width: 920px; margin: 0 auto; padding: 24px 20px 80px; color: #183047; }
-.interview-header { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 12px 0 28px; }
-.interview-header a { color: #087c80; text-decoration: none; }
-.interview-intro { margin-bottom: 24px; }
-.interview-intro h1 { font-size: clamp(2rem, 4vw, 3rem); margin: 8px 0; }
-.interview-intro p { line-height: 1.6; }
-.interview-progress { display: flex; gap: 10px; margin: 18px 0; flex-wrap: wrap; }
-.interview-progress button { border: 1px solid #c9d9df; background: white; border-radius: 999px; padding: 10px 16px; cursor: pointer; }
-.interview-progress button.is-current { background: #087c80; border-color: #087c80; color: white; }
-.interview-card { border: 1px solid #dce7ea; border-radius: 18px; background: white; box-shadow: 0 12px 35px rgba(12, 48, 62, .06); padding: 26px; margin: 18px 0; }
-.interview-card h2 { margin: 8px 0 22px; line-height: 1.4; }
-.interview-card h3 { margin: 20px 0 8px; }
-.interview-card p { line-height: 1.6; }
-.interview-card small { display: block; color: #607584; }
-.question-label { color: #087c80; font-weight: 700; letter-spacing: .08em; }
-.interview-actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
-.interview-card textarea { width: 100%; min-height: 170px; }
-.interview-hint { color: #607584; font-size: .9rem; }
-.interview-answer { white-space: pre-wrap; background: #f5fafb; border-radius: 12px; padding: 16px; }
-.feedback-score { font-size: 1.15rem; color: #087c80; }
-.feedback-score strong, .interview-finish strong { font-size: 1.7rem; }
-@media (max-width: 600px) { .interview-header { align-items: flex-start; flex-direction: column; } .interview-card { padding: 18px; } }
+.practice-shell { max-width: 920px; margin: 0 auto; padding-bottom: 40px; color: var(--ink); }
+.practice-intro { margin-bottom: 24px; }
+.practice-intro h1 { font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; margin: 8px 0; color: var(--heading); line-height: 1.2; }
+.practice-intro p { line-height: 1.6; color: var(--muted); }
+.practice-progress { display: flex; gap: 10px; margin: 18px 0; flex-wrap: wrap; }
+.practice-progress button { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 10px 16px; cursor: pointer; }
+.practice-progress button.is-current { background: var(--green); border-color: var(--green); color: white; }
+.practice-card { border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--soft-shadow); padding: 26px; margin: 18px 0; }
+.practice-card h2 { margin: 8px 0 22px; line-height: 1.4; color: var(--heading); font-weight: 800; }
+.practice-card h3 { margin: 20px 0 8px; color: var(--heading); font-weight: 800; }
+.practice-card p { line-height: 1.6; }
+.practice-card small { display: block; color: var(--muted); }
+.practice-card .secondary-button, .practice-card .primary-button { width: auto; }
+.question-label { color: var(--green); font-weight: 700; letter-spacing: .08em; }
+.practice-actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 15px 0; }
+.practice-card textarea { width: 100%; min-height: 170px; margin-top: 0; }
+.practice-hint { color: var(--muted); font-size: .9rem; }
+.practice-answer { white-space: pre-wrap; background: var(--surface-muted); border-radius: 12px; padding: 16px; }
+.feedback-score { font-size: 1.15rem; color: var(--green); }
+.feedback-score strong, .practice-finish strong { font-size: 1.7rem; }
+@media (max-width: 600px) { .practice-card { padding: 18px; } }
+
+.practice-follow-up { border-color: rgba(16, 185, 129, .45); }
+.practice-progress-note { color: var(--muted); }
+.practice-progress-note strong { color: var(--green); }
+.practice-attempts { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--line); }
+.practice-attempts summary { cursor: pointer; color: var(--heading); font-weight: 800; }
+.practice-attempt { margin-top: 14px; padding: 14px; border: 1px dashed var(--line); border-radius: 12px; }
+.practice-attempt > strong { color: var(--heading); }
+.practice-attempt .feedback-score strong { font-size: 1.2rem; }

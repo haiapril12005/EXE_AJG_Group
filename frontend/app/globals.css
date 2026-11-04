@@ -1017,6 +1017,51 @@ button:disabled {
   transition: border-color .2s ease, box-shadow .2s ease;
 }
 
+.password-field {
+  position: relative;
+}
+
+.password-field .form-input {
+  padding-right: 46px;
+}
+
+/* Edge's built-in reveal icon would duplicate the toggle. */
+.password-field .form-input::-ms-reveal,
+.password-field .form-input::-ms-clear {
+  display: none;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.password-toggle:hover:not(:disabled) {
+  color: var(--green);
+}
+
+.password-toggle:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+
+.password-toggle:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 .auth-switch {
   margin: 19px 0 0;
   color: var(--muted);

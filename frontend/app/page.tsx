@@ -1,58 +1,16 @@
 "use client";
 
-import QRCode from "qrcode";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
-import { createClient } from "../utils/supabase/client";
-import { CvPaper, emptyCv, type CvData, type RewriteSection } from "./cv-editor";
-import { AuthScreen } from "./auth-screen";
-import "./workspace.css";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { api } from "../utils/api";
+import { loadDraft, saveDraft, type DraftJob, type JdDraft } from "../utils/draft";
+import { analysisLabel, type SavedAnalysis, type SavedCv } from "../utils/history";
+import { QualityCard, type QualityEvaluation } from "./analysis-report";
+import { useApp } from "./app-frame";
+import { useBilling } from "./billing";
 
-const supabase = createClient();
-
-type Profile = {
-  id: string;
-  email: string;
-  full_name: string;
-  credits: number;
-  payments_enabled: boolean;
-};
-
-type Analysis = {
-  analysis_id: string;
-  rci_score: number;
-  layer_1_skills: {
-    matched: string[];
-    missing: string[];
-    evidence: { claim: string; quote: string }[];
-  };
-  layer_2_projects: {
-    project_name: string;
-    issue: string;
-    suggestion: string;
-    evidence: string;
-  }[];
-  layer_3_education: {
-    major_matched: boolean;
-    english_matched: boolean;
-    notes: string;
-    evidence: { claim: string; quote: string }[];
-  };
-  layer_4_mock: string[] | null;
-  is_premium_unlocked: boolean;
-  credits_remaining: number | null;
-  scoring_breakdown?: { category: "skills" | "experience" | "education"; weight: number; matched: number; total: number; score: number }[];
-  requirements?: { category: string; jd_quote: string; cv_quote: string | null; matched: boolean }[];
-};
-
-type QualityEvaluation = {
-  quality_score: number;
-  issues: { category: "content" | "presentation"; severity: string; finding: string;
-    suggestion: string; evidence_quote: string | null }[];
-  note?: string;
-};
-type SavedCv = { id: string; original_name: string; created_at: string };
-type SavedAnalysis = { id: string; cv_id: string; jd_text: string; rci_score: number; created_at: string };
+type Action = "upload" | "analyze" | "evaluate" | "interview";
 
 const ANALYSIS_STEPS = [
   "Đang phân tích kỹ năng...",
@@ -62,210 +20,91 @@ const ANALYSIS_STEPS = [
   "Sắp xong, đang hoàn thiện báo cáo..."
 ];
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/$/, "");
-
-async function api<T>(path: string, token: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}/api${path}`, {
-    ...init,
-    headers: {
-      ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-      Authorization: `Bearer ${token}`,
-      ...init?.headers
-    }
-  });
-  const payload = await response.json().catch(() => ({})) as { error?: string };
-  if (!response.ok) throw new Error(payload.error || "Yêu cầu chưa thể hoàn tất.");
-  return payload as T;
-}
-
-function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <section className={`soft-card ${className}`}>{children}</section>;
-}
-
-function Brand() {
-  return (
-    <a href="#" className="brand">
-      <span className="brand-mark" aria-hidden="true">♧</span>
-      <span><strong>AI CAREER <em>READY</em></strong><small>DỰ ÁN EXE101 · NHÓM 81</small></span>
-    </a>
-  );
-}
-
-function ThemeToggle({ theme, onToggle }: { theme: "light" | "dark"; onToggle: () => void }) {
-  return (
-    <button className="theme-toggle" type="button" onClick={onToggle} aria-label={theme === "light" ? "Bật giao diện tối" : "Bật giao diện sáng"}>
-      <span aria-hidden="true">{theme === "light" ? "☾" : "☀"}</span>
-    </button>
-  );
-}
+const RECENT_LIMIT = 3;
 
 export default function Home() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [session, setSession] = useState<Session | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const { token, refreshProfile } = useApp();
+  const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [cvId, setCvId] = useState("");
   const [jd, setJd] = useState("");
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [job, setJob] = useState<DraftJob | null>(null);
   const [quality, setQuality] = useState<QualityEvaluation | null>(null);
   const [savedCvs, setSavedCvs] = useState<SavedCv[]>([]);
+  const [cvTotal, setCvTotal] = useState(0);
   const [pastAnalyses, setPastAnalyses] = useState<SavedAnalysis[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [questionCount, setQuestionCount] = useState<3 | 5>(3);
+  const [action, setAction] = useState<Action | null>(null);
   const [notice, setNotice] = useState("");
-  const [payment, setPayment] = useState<{ order_code: number; checkoutUrl: string; qrImage: string | null } | null>(null);
-  const [paymentStatus, setPaymentStatus] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [cvData, setCvData] = useState<CvData | null>(null);
-  const cvRef = useRef<CvData | null>(null);
-  const dirtyRef = useRef(false);
-  const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">("saved");
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [rewriting, setRewriting] = useState<string | null>(null);
-  const [highlight, setHighlight] = useState<string | null>(null);
-  const [undo, setUndo] = useState<{ key: string; section: RewriteSection; index: number; previous: string } | null>(null);
-  const [prevScore, setPrevScore] = useState<number | null>(null);
-  const [loadingCv, setLoadingCv] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const billing = useBilling(null, () => undefined);
+  const busy = action !== null;
+
   useEffect(() => {
-    if (!busy) { setStepIndex(0); return; }
+    if (action !== "analyze") { setStepIndex(0); return; }
     const timer = window.setInterval(() => setStepIndex((value) => value + 1), 2500);
     return () => window.clearInterval(timer);
-  }, [busy]);
-  const initialCvLoaded = useRef(false);
+  }, [action]);
 
-  async function signOut() {
-    const { error } = await supabase.auth.signOut();
-    if (error) setNotice(`Không thể đăng xuất: ${error.message}`);
+  function updateDraft(next: JdDraft) {
+    setJd(next.text);
+    setJob(next.job);
+    saveDraft(next);
   }
 
-  const refreshProfile = useCallback(async (token: string) => {
-    const result = await api<{ user: Profile }>("/user/me", token);
-    setProfile(result.user);
-  }, []);
-
-  const refreshHistory = useCallback(async (token: string) => {
+  async function refreshHistory(): Promise<SavedCv[]> {
     const [cvs, analyses] = await Promise.all([
-      api<{ cvs: SavedCv[] }>("/cv", token),
+      api<{ cvs: SavedCv[]; total?: number }>("/cv", token),
       api<{ analyses: SavedAnalysis[] }>("/analyses", token)
     ]);
     setSavedCvs(cvs.cvs);
+    setCvTotal(cvs.total ?? cvs.cvs.length);
     setPastAnalyses(analyses.analyses);
+    return cvs.cvs;
+  }
+
+  useEffect(() => {
+    void refreshHistory().then((cvs) => {
+      setCvId((current) => current || cvs[0]?.id || "");
+    }).catch((error: Error) => setNotice(error.message));
+    const draft = loadDraft();
+    setJd(draft.text);
+    setJob(draft.job);
+    const jobId = new URLSearchParams(window.location.search).get("job");
+    if (!jobId) return;
+    window.history.replaceState(null, "", "/");
+    void api<{ job: DraftJob & { description: string } }>(`/jobs/${encodeURIComponent(jobId)}`, token)
+      .then(({ job: posting }) => updateDraft({
+        text: posting.description, job: { id: posting.id, title: posting.title, company: posting.company }
+      }))
+      .catch((error: Error) => setNotice(error.message));
+    // runs once for the signed-in user
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    const savedTheme = window.localStorage.getItem("cv-fit-theme");
-    if (savedTheme === "dark" || savedTheme === "light") setTheme(savedTheme);
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem("cv-fit-theme", theme);
-  }, [theme]);
-
-  useEffect(() => {
-    let mounted = true;
-    void supabase.auth.getSession().then(({ data, error }) => {
-      if (!mounted) return;
-      if (error) setNotice(error.message);
-      setSession(data.session);
-      setAuthLoading(false);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-    });
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (session) void refreshProfile(session.access_token).catch((error: Error) => {
-      setNotice(error.message);
-    });
-    if (session) void refreshHistory(session.access_token).catch((error: Error) => {
-      setNotice(error.message);
-    });
-  }, [session, refreshProfile, refreshHistory]);
-
-  useEffect(() => {
-    if (!session || !payment) return;
-    let active = true;
-    let unlocking = false;
-    const poll = async () => {
-      try {
-        const result = await api<{ transaction: { status: string } }>(
-          `/payment/${payment.order_code}`,
-          session.access_token
-        );
-        if (!active) return;
-        if (result.transaction.status === "SUCCESS") {
-          setPaymentStatus("Thanh toán thành công! Đang cập nhật lượt phân tích...");
-          if (!analysis || analysis.layer_4_mock || unlocking) {
-            if (!unlocking) {
-              setPayment(null);
-              setPaymentStatus("Đã cộng 3 lượt phân tích vào tài khoản.");
-              await refreshProfile(session.access_token);
-            }
-            return;
-          }
-          unlocking = true;
-          try {
-            const unlocked = await api<{ layer_4_mock: string[]; credits_remaining: number }>(
-              `/analyses/${analysis.analysis_id}/unlock`,
-              session.access_token,
-              { method: "POST", body: JSON.stringify({}) }
-            );
-            if (!active) return;
-            setAnalysis({ ...analysis, layer_4_mock: unlocked.layer_4_mock, is_premium_unlocked: true, credits_remaining: unlocked.credits_remaining });
-            setPaymentStatus("Mock Interview đã được mở khóa.");
-            setPayment(null);
-            await refreshProfile(session.access_token);
-          } catch (error) {
-            setPaymentStatus(error instanceof Error ? error.message : "Không thể mở khóa Mock Interview.");
-            setPayment(null);
-            await refreshProfile(session.access_token);
-          }
-        } else if (result.transaction.status === "CANCELLED") {
-          setPaymentStatus("Giao dịch đã bị hủy.");
-          setPayment(null);
-        }
-      } catch {
-        if (active) setPaymentStatus("Đang chờ xác nhận thanh toán...");
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 3000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [session, payment, analysis, refreshProfile]);
-
-  async function saveSelectedFile(file: File, token: string): Promise<string> {
+  async function saveSelectedFile(file: File): Promise<string> {
     const form = new FormData();
     form.append("file", file);
-    const result = await api<{ cv_id: string; cv_data?: CvData }>("/cv/upload", token, { method: "POST", body: form });
-    dirtyRef.current = false;
+    const result = await api<{ cv_id: string }>("/cv/upload", token, { method: "POST", body: form });
     setCvId(result.cv_id);
-    setCvData(result.cv_data ?? null);
-    setSaveState("saved");
-    setAnalysis(null);
     setQuality(null);
-    setEditorOpen(false);
-    await refreshHistory(token);
+    await refreshHistory();
     return result.cv_id;
   }
 
   async function uploadCV(event: FormEvent) {
     event.preventDefault();
-    if (!session || !selectedFile) return;
-    setBusy(true);
+    if (!selectedFile) return;
+    setAction("upload");
     setNotice("");
     try {
-      await saveSelectedFile(selectedFile, session.access_token);
+      await saveSelectedFile(selectedFile);
       setNotice("CV đã được tải lên an toàn. Số điện thoại và email được che trước khi gửi AI.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể tải CV.");
     } finally {
-      setBusy(false);
+      setAction(null);
     }
   }
 
@@ -278,566 +117,186 @@ export default function Home() {
     setNotice("");
     setSelectedFile(file);
     if (file) {
-      dirtyRef.current = false;
       setCvId("");
-      setCvData(null);
-      setEditorOpen(false);
-      setAnalysis(null);
       setQuality(null);
     }
   }
 
-  async function flushSave(): Promise<void> {
-    if (!session || !cvId || !dirtyRef.current || !cvRef.current) return;
-    dirtyRef.current = false;
-    setSaveState("saving");
-    try {
-      await api("/cv/" + cvId, session.access_token, { method: "PUT", body: JSON.stringify({ cv_data: cvRef.current }) });
-      setSaveState(dirtyRef.current ? "dirty" : "saved");
-    } catch (error) {
-      dirtyRef.current = true;
-      setSaveState("error");
-      throw error;
-    }
-  }
-
-  function changeCv(next: CvData) {
-    dirtyRef.current = true;
-    setSaveState("dirty");
-    setCvData(next);
-  }
-
-  useEffect(() => {
-    cvRef.current = cvData;
-    if (!dirtyRef.current) return;
-    const timer = window.setTimeout(() => { void flushSave().catch(() => undefined); }, 1200);
-    return () => window.clearTimeout(timer);
-    // flushSave reads the latest values through refs
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cvData, cvId, session]);
-
-  async function loadCv(id: string, token: string, open: boolean): Promise<void> {
-    setLoadingCv(true);
-    try {
-      const result = await api<{ cv_data: CvData }>(`/cv/${id}`, token);
-      setCvId(id);
-      dirtyRef.current = false;
-      setCvData(result.cv_data);
-      setQuality(null);
-      setSaveState("saved");
-      if (open) { setEditorOpen(true); setAnalysis(null); }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Không thể mở CV.");
-    } finally {
-      setLoadingCv(false);
-    }
-  }
-
-  async function evaluateCv() {
-    if (!session || !cvId) return;
-    setBusy(true);
-    setNotice("Đang đánh giá chất lượng CV...");
-    try {
-      await flushSave();
-      const result = await api<QualityEvaluation>(`/cv/${cvId}/evaluate`, session.access_token,
-        { method: "POST", body: JSON.stringify({}) });
-      setQuality(result);
-      setNotice("Đã hoàn tất đánh giá CV độc lập với JD.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Không thể đánh giá CV.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function openAnalysis(id: string) {
-    if (!session) return;
-    setBusy(true);
-    try {
-      const result = await api<{ analysis: Analysis & { cv_id: string; jd_text: string } }>(
-        `/analyses/${id}`, session.access_token);
-      setCvId(result.analysis.cv_id);
-      setJd(result.analysis.jd_text);
-      await loadCv(result.analysis.cv_id, session.access_token, false);
-      setAnalysis(result.analysis);
-      setEditorOpen(true);
-      setQuality(null);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Không mở được báo cáo.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function startInterview() {
-    if (!session || !analysis) return;
-    setBusy(true);
-    try {
-      const result = await api<{ session: { id: string } }>("/interviews", session.access_token,
-        { method: "POST", body: JSON.stringify({ analysis_id: analysis.analysis_id }) });
-      window.location.href = `/interview?id=${encodeURIComponent(result.session.id)}`;
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Không bắt đầu được phiên phỏng vấn.");
-      setBusy(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!session || initialCvLoaded.current) return;
-    const id = new URLSearchParams(window.location.search).get("cv");
-    initialCvLoaded.current = true;
-    if (!id) return;
+  function chooseSavedCv(id: string) {
     setCvId(id);
-    window.history.replaceState(null, "", "/");
-    void loadCv(id, session.access_token, true);
-    // runs once when the session becomes available
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
-
-  function setDescription(section: RewriteSection, index: number, value: string) {
-    dirtyRef.current = true;
-    setSaveState("dirty");
-    setCvData((current) => {
-      if (!current) return current;
-      if (section === "summary") return { ...current, summary: value };
-      return { ...current, [section]: current[section].map((item, i) => (i === index ? { ...item, description: value } : item)) } as CvData;
-    });
+    setSelectedFile(null);
+    setQuality(null);
   }
 
-  function typeInto(section: RewriteSection, index: number, text: string): Promise<void> {
-    return new Promise((resolve) => {
-      let position = 0;
-      const timer = window.setInterval(() => {
-        position = Math.min(text.length, position + 4);
-        setDescription(section, index, text.slice(0, position));
-        if (position >= text.length) {
-          window.clearInterval(timer);
-          resolve();
-        }
-      }, 16);
-    });
-  }
-
-  function suggestionFor(section: RewriteSection, index: number): string {
-    const missing = analysis?.layer_1_skills.missing ?? [];
-    const fallback = missing.length
-      ? `Làm nổi bật các yêu cầu của JD mà mục này có thể chứng minh bằng thông tin sẵn có (JD đang thiếu: ${missing.join(", ")}). Không thêm công nghệ chưa có.`
-      : "Làm nổi bật các điểm phù hợp nhất với JD bằng thông tin sẵn có.";
-    if (section !== "projects" || !analysis || !cvRef.current) return fallback;
-    const name = cvRef.current.projects[index]?.name.trim().toLowerCase();
-    const match = name ? analysis.layer_2_projects.find((item) => {
-      const candidate = item.project_name.trim().toLowerCase();
-      return candidate.includes(name) || name.includes(candidate);
-    }) : undefined;
-    return match ? `${match.issue}. ${match.suggestion}` : fallback;
-  }
-
-  async function rewriteOne(section: RewriteSection, index: number, suggestion?: string) {
-    if (!session || !cvRef.current) return;
-    if (jd.trim().length < 20) {
-      setNotice("Hãy dán JD trước khi nhờ AI viết lại.");
-      return;
-    }
-    const cv = cvRef.current;
-    const current = section === "summary"
-      ? { description: cv.summary }
-      : section === "experience"
-        ? cv.experience[index]
-        : cv.projects[index];
-    if (!current) return;
-    const key = `${section}-${index}`;
-    setRewriting(key);
-    setNotice("");
-    try {
-      const result = await api<{ new_description: string }>("/ai/rewrite-section", session.access_token, {
-        method: "POST",
-        body: JSON.stringify({
-          jd_text: jd,
-          section_type: section,
-          current_section_data: current,
-          ai_suggestion: suggestion ?? suggestionFor(section, index)
-        })
-      });
-      setUndo({ key, section, index, previous: current.description });
-      setHighlight(key);
-      await typeInto(section, index, result.new_description);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "AI chưa thể viết lại mục này.");
-    } finally {
-      setRewriting(null);
-    }
-  }
-
-  async function optimizeAll() {
-    const cv = cvRef.current;
-    if (!cv) return;
-    const targets: [RewriteSection, number][] = [];
-    if (cv.summary.trim()) targets.push(["summary", 0]);
-    cv.projects.forEach((item, index) => { if (item.description.trim()) targets.push(["projects", index]); });
-    cv.experience.forEach((item, index) => { if (item.description.trim()) targets.push(["experience", index]); });
-    for (const [section, index] of targets) await rewriteOne(section, index);
-  }
-
-  function revertRewrite() {
-    if (!undo) return;
-    setDescription(undo.section, undo.index, undo.previous);
-    setUndo(null);
-    setHighlight(null);
-  }
-
-  async function reanalyze() {
-    try {
-      await flushSave();
-    } catch {
-      setNotice("Không thể lưu CV trước khi phân tích lại.");
-      return;
-    }
-    await runAnalysis();
-  }
-
-  function exportPdf() {
-    document.title = `CV-${cvData?.personal_info.name || "ung-vien"}`;
-    window.print();
-  }
-
-  async function runAnalysis(id = cvId) {
-    if (!session || !id) return;
-    setBusy(true);
-    setNotice("");
-    setPaymentStatus("");
-    setPrevScore(analysis ? analysis.rci_score : null);
-    try {
-      const result = await api<Analysis>("/analyze", session.access_token, {
-        method: "POST",
-        body: JSON.stringify({ cv_id: id, jd_text: jd })
-      });
-      setAnalysis(result);
-      await refreshProfile(session.access_token);
-      await refreshHistory(session.access_token);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Không thể phân tích CV.");
-    } finally {
-      setBusy(false);
-    }
+  /** The CV to work on: the chosen one, or the selected PDF uploaded on the spot. */
+  async function resolveCvId(): Promise<string> {
+    const id = cvId || (selectedFile ? await saveSelectedFile(selectedFile) : "");
+    if (!id) throw new Error("Hãy chọn CV trước.");
+    return id;
   }
 
   async function analyze(event: FormEvent) {
     event.preventDefault();
-    if (!session || busy) return;
-    setBusy(true);
+    if (busy) return;
+    setAction("analyze");
     setNotice("");
     try {
-      await flushSave();
-      const id = cvId || (selectedFile ? await saveSelectedFile(selectedFile, session.access_token) : "");
-      if (!id) {
-        setNotice("Hãy chọn CV để phân tích.");
-        return;
-      }
-      if (!cvRef.current) await loadCv(id, session.access_token, false);
-      await runAnalysis(id);
+      const id = await resolveCvId();
+      const result = await api<{ analysis_id: string }>("/analyze", token, {
+        method: "POST",
+        body: JSON.stringify({ cv_id: id, jd_text: jd, ...(job ? { job_id: job.id } : {}) })
+      });
+      await refreshProfile();
+      router.push(`/analysis/${result.analysis_id}`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Không thể chuẩn bị CV trước khi phân tích.");
-    } finally {
-      setBusy(false);
+      setNotice(error instanceof Error ? error.message : "Không thể phân tích CV.");
+      setAction(null);
     }
   }
 
-  async function unlockInterview() {
-    if (!session || !analysis) return;
-    setBusy(true);
-    setNotice("");
+  async function quickInterview() {
+    setAction("interview");
+    setNotice("AI đang tạo câu hỏi phỏng vấn theo CV và JD...");
     try {
-      const unlocked = await api<{ layer_4_mock: string[]; credits_remaining: number | null }>(
-        `/analyses/${analysis.analysis_id}/unlock`, session.access_token,
-        { method: "POST", body: JSON.stringify({}) }
-      );
-      setAnalysis({ ...analysis, layer_4_mock: unlocked.layer_4_mock,
-        is_premium_unlocked: true, credits_remaining: unlocked.credits_remaining });
+      const id = await resolveCvId();
+      const result = await api<{ session: { id: string } }>("/interviews", token,
+        { method: "POST", body: JSON.stringify({ cv_id: id, jd_text: jd, question_count: questionCount }) });
+      router.push(`/interview/${result.session.id}`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Không tạo được câu hỏi phỏng vấn.");
-    } finally {
-      setBusy(false);
+      setNotice(error instanceof Error ? error.message : "Không tạo được phiên phỏng vấn.");
+      setAction(null);
     }
   }
 
-  async function createPayment() {
-    if (!session) return;
-    setBusy(true);
-    setNotice("");
+  async function evaluateCv() {
+    if (!cvId) return;
+    setAction("evaluate");
+    setNotice("Đang đánh giá chất lượng CV...");
     try {
-      const result = await api<{ order_code: number; checkoutUrl: string; qrCode?: string | null }>(
-        "/payment/create-qr",
-        session.access_token,
-        { method: "POST", body: JSON.stringify({ package: "premium_29k" }) }
-      );
-      const qrImage = result.qrCode ? await QRCode.toDataURL(result.qrCode, { width: 240, margin: 1 }) : null;
-      setPayment({ order_code: result.order_code, checkoutUrl: result.checkoutUrl, qrImage });
-      setPaymentStatus("Quét mã QR hoặc mở trang thanh toán. Hệ thống tự kiểm tra trạng thái mỗi 3 giây.");
+      setQuality(await api<QualityEvaluation>(`/cv/${cvId}/evaluate`, token, { method: "POST", body: JSON.stringify({}) }));
+      setNotice("Đã hoàn tất đánh giá CV độc lập với JD.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Không thể tạo mã thanh toán.");
+      setNotice(error instanceof Error ? error.message : "Không thể đánh giá CV.");
     } finally {
-      setBusy(false);
+      setAction(null);
     }
   }
 
-  if (authLoading) {
-    return <main className={`app-shell loading-shell ${theme === "dark" ? "theme-dark" : ""}`}><p>Đang kiểm tra phiên đăng nhập...</p></main>;
-  }
-  if (!session) return <AuthScreen onSession={setSession} theme={theme}
-    header={<><Brand /><ThemeToggle theme={theme} onToggle={() => setTheme(theme === "light" ? "dark" : "light")} /></>} />;
-
-  const workspace = !!cvData && (editorOpen || !!analysis);
+  const uploaded = !!selectedFile && !!cvId;
+  const canUseCv = !!cvId || !!selectedFile;
+  const jdReady = jd.trim().length >= 50;
 
   return (
-    <main className={`app-shell ${theme === "dark" ? "theme-dark" : ""}`}>
-      <header className="site-header no-print">
-        <div className="header-inner">
-          <Brand />
-          <div className="header-actions">
-            <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "light" ? "dark" : "light")} />
-            <span className="header-divider" />
-            <div className="profile-chip">
-              <span className="avatar">{(profile?.full_name || session.user.email || "U").trim().charAt(0).toUpperCase()}</span>
-              <span className="profile-name">{profile?.full_name || session.user.email}</span>
-            </div>
-            {profile?.payments_enabled && <span className="credits-chip">Credits <strong>{profile.credits}</strong></span>}
-            <button className="text-button" onClick={() => void signOut()}>Đăng xuất</button>
+    <>
+      <section className="hero">
+        <p className="eyebrow">BƯỚC TIẾP THEO TRONG SỰ NGHIỆP CỦA BẠN</p>
+        <h1>Tối Ưu Hóa Hồ Sơ<br /><span>Chinh Phục Nhà Tuyển Dụng</span></h1>
+        <p>Hệ thống AI tự động đối chiếu CV với JD, xác định chính xác những điểm còn thiếu và gợi ý cách cải thiện hồ sơ.</p>
+      </section>
+
+      {notice && <p role="status" className="notice notice-info no-print">{notice}</p>}
+      {billing.panel}
+
+      <section className="input-grid" aria-label="Thông tin CV và mô tả công việc">
+        <section className="soft-card input-card">
+          <div className="section-heading">
+            <span className="step-badge">1</span>
+            <div><h2>Chọn CV</h2><p>Tải PDF tối đa 5 MB hoặc dùng CV đã lưu</p></div>
           </div>
-        </div>
-      </header>
+          <form onSubmit={uploadCV}>
+            <button
+              type="button"
+              className="drop-area"
+              onClick={() => fileRef.current?.click()}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                chooseFile(event.dataTransfer.files[0] ?? null);
+              }}
+            >
+              <span className="upload-icon" aria-hidden="true">↑</span>
+              <strong>{selectedFile?.name || "Kéo thả file CV vào đây"}</strong>
+              <span>Định dạng hỗ trợ: PDF · tối đa 5 MB</span>
+              <span className="choose-file">Chọn file</span>
+            </button>
+            <input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} />
+            {selectedFile && (
+              <div className="file-status">
+                <span className="file-icon">PDF</span>
+                <span className="file-info"><strong>{selectedFile.name}</strong><small>{uploaded ? "Đã tải lên an toàn" : `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB · Sẵn sàng tải lên`}</small></span>
+                <span className="status-check" aria-label={uploaded ? "Đã tải lên" : "Sẵn sàng"}>{uploaded ? "✓" : "•"}</span>
+              </div>
+            )}
+            <p className="privacy-note">Thông tin liên hệ sẽ được che trước khi gửi AI.</p>
+            {selectedFile && !uploaded && <button disabled={busy} className="secondary-button">{action === "upload" ? "Đang xử lý PDF..." : "Tải CV lên"}</button>}
+          </form>
+          <div className="cv-alt-actions">
+            {savedCvs.length > 0 && <label className="field-label">CV đã lưu
+              <select className="form-input" value={cvId} disabled={busy} onChange={(event) => chooseSavedCv(event.target.value)}>
+                <option value="">— Chọn CV —</option>
+                {savedCvs.map((item) => <option key={item.id} value={item.id}>{item.original_name}</option>)}
+              </select>
+            </label>}
+            {cvTotal > savedCvs.length && <p className="muted-copy field-hint">Đang hiện {savedCvs.length}/{cvTotal} CV gần nhất. <Link href="/history" className="inline-link">Mở CV cũ hơn trong Lịch sử</Link></p>}
+            {cvId && <Link href={`/cv/${cvId}`} className="secondary-button link-button">✎ Chỉnh sửa CV trên web</Link>}
+            {cvId && <button type="button" disabled={busy} className="secondary-button" onClick={() => void evaluateCv()}>◎ Đánh giá chất lượng CV</button>}
+            <Link href="/create" className="secondary-button link-button">＋ Hoặc tạo CV mới từ form</Link>
+          </div>
+        </section>
 
-      <div className={`page-content ${workspace ? "page-wide" : ""}`}>
-        {!workspace && <section className="hero">
-          <p className="eyebrow">BƯỚC TIẾP THEO TRONG SỰ NGHIỆP CỦA BẠN</p>
-          <h1>Tối Ưu Hóa Hồ Sơ<br /><span>Chinh Phục Nhà Tuyển Dụng</span></h1>
-          <p>Hệ thống AI tự động đối chiếu CV với JD, xác định chính xác những điểm còn thiếu và gợi ý cách cải thiện hồ sơ.</p>
-        </section>}
-
-        {notice && <p role="status" className="notice notice-info no-print">{notice}</p>}
-        {profile?.payments_enabled && profile.credits === 0 && <p className="no-print">Bạn đã dùng hết lượt phân tích. <button type="button"
-          className="secondary-button" disabled={busy || !!payment} onClick={() => void createPayment()}>
-          Mua thêm 3 lượt · 29.000đ</button></p>}
-        {paymentStatus && <p role="status" className="payment-status no-print">{paymentStatus}</p>}
-        {payment && <div className="payment-panel no-print">
-          {payment.qrImage && <img src={payment.qrImage} alt="Mã QR thanh toán PayOS" className="payment-qr" />}
-          <div><strong>Đơn hàng #{payment.order_code}</strong><p>Quét mã bằng ứng dụng ngân hàng hoặc mở trang thanh toán PayOS.</p>
-            <a href={payment.checkoutUrl} target="_blank" rel="noreferrer">Mở trang thanh toán ↗</a></div>
-        </div>}
-
-        {!workspace && <section className="input-grid" aria-label="Thông tin CV và mô tả công việc">
-          <GlassCard className="input-card">
-            <div className="section-heading">
-              <span className="step-badge">1</span>
-              <div><h2>Tải CV lên</h2><p>PDF · tối đa 5 MB</p></div>
-            </div>
-            <form onSubmit={uploadCV}>
-              <button
-                type="button"
-                className="drop-area"
-                onClick={() => fileRef.current?.click()}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  chooseFile(event.dataTransfer.files[0] ?? null);
-                }}
-              >
-                <span className="upload-icon" aria-hidden="true">↑</span>
-                <strong>{selectedFile?.name || "Kéo thả file CV vào đây"}</strong>
-                <span>Định dạng hỗ trợ: PDF · tối đa 5 MB</span>
-                <span className="choose-file">Chọn file</span>
+        <section className="soft-card input-card">
+          <div className="section-heading">
+            <span className="step-badge">2</span>
+            <div><h2>Chọn mô tả công việc (JD)</h2><p>Dán nội dung tuyển dụng hoặc <Link href="/jobs" className="inline-link">chọn từ kho việc làm</Link></p></div>
+          </div>
+          <form onSubmit={analyze}>
+            {job && <p className="job-chip">Đang dùng JD: <strong>{job.title}</strong> · {job.company} <button type="button" className="text-button" disabled={busy} onClick={() => updateDraft({ text: "", job: null })}>Bỏ chọn</button></p>}
+            <textarea
+              required
+              minLength={50}
+              maxLength={20000}
+              value={jd}
+              // An edited JD no longer matches the posting, so the job link is dropped.
+              onChange={(event) => updateDraft({ text: event.target.value, job: null })}
+              placeholder="Hãy dán nội dung tuyển dụng (JD) mà bạn muốn ứng tuyển vào đây..."
+              className="jd-input"
+            />
+            <div className="input-meta"><span>Tối thiểu 50 ký tự</span><span>{jd.length.toLocaleString("vi-VN")}/20.000</span></div>
+            <button disabled={!canUseCv || !jdReady || busy || billing.paying} className="primary-button analyze-button">
+              <span aria-hidden="true">✦</span>{action === "analyze" ? ANALYSIS_STEPS[stepIndex % ANALYSIS_STEPS.length] : "Phân tích bằng AI"}
+            </button>
+            <div className="quick-interview-row">
+              <button type="button" disabled={!canUseCv || !jdReady || busy} className="secondary-button quick-interview-button" onClick={() => void quickInterview()}>
+                {action === "interview" ? "Đang tạo câu hỏi..." : "🎙 Luyện phỏng vấn nhanh theo JD này"}
               </button>
-              <input ref={fileRef} className="visually-hidden" type="file" accept="application/pdf,.pdf" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} />
-              {selectedFile && (
-                <div className="file-status">
-                  <span className="file-icon">PDF</span>
-                  <span className="file-info"><strong>{selectedFile.name}</strong><small>{cvId ? "Đã tải lên an toàn" : `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB · Sẵn sàng tải lên`}</small></span>
-                  <span className="status-check" aria-label={cvId ? "Đã tải lên" : "Sẵn sàng"}>{cvId ? "✓" : "•"}</span>
-                </div>
-              )}
-              <p className="privacy-note">Thông tin liên hệ sẽ được che trước khi gửi AI.</p>
-              <button disabled={!selectedFile || busy} className="secondary-button">{busy && !cvId ? "Đang xử lý PDF..." : cvId ? "Tải CV khác" : "Tải CV lên"}</button>
-            </form>
-            <div className="cv-alt-actions">
-              {cvId && <button type="button" disabled={loadingCv} className="secondary-button" onClick={() => session && void loadCv(cvId, session.access_token, true)}>{loadingCv ? "Đang chuẩn bị CV..." : "✎ Chỉnh sửa CV trên web"}</button>}
-              {cvId && <button type="button" disabled={busy} className="secondary-button" onClick={() => void evaluateCv()}>◎ Đánh giá chất lượng CV</button>}
-              <a href="/create" className="secondary-button link-button">＋ Hoặc tạo CV mới từ form</a>
+              <label className="question-count">Số câu
+                <select className="form-input" value={questionCount} disabled={busy} onChange={(event) => setQuestionCount(event.target.value === "5" ? 5 : 3)}>
+                  <option value="3">3 câu</option>
+                  <option value="5">5 câu</option>
+                </select>
+              </label>
             </div>
-          </GlassCard>
+          </form>
+        </section>
+      </section>
 
-          <GlassCard className="input-card">
-            <div className="section-heading">
-              <span className="step-badge">2</span>
-              <div><h2>Dán mô tả công việc (JD)</h2><p>Thêm nội dung tuyển dụng bạn muốn ứng tuyển</p></div>
-            </div>
-            <form onSubmit={analyze}>
-              <textarea
-                required
-                minLength={50}
-                maxLength={20000}
-                value={jd}
-                onChange={(event) => setJd(event.target.value)}
-                placeholder="Hãy dán nội dung tuyển dụng (JD) mà bạn muốn ứng tuyển vào đây..."
-                className="jd-input"
-              />
-              <div className="input-meta"><span>Tối thiểu 50 ký tự</span><span>{jd.length.toLocaleString("vi-VN")}/20.000</span></div>
-              <button disabled={(!cvId && !selectedFile) || jd.trim().length < 50 || busy || !!payment} className="primary-button analyze-button">
-                <span aria-hidden="true">✦</span>{busy && !cvId ? "Đang tải và đọc CV..." : busy ? ANALYSIS_STEPS[stepIndex % ANALYSIS_STEPS.length] : "Phân tích bằng AI"}
-              </button>
-            </form>
-          </GlassCard>
-        </section>}
+      {quality && <QualityCard quality={quality} />}
 
-        {!workspace && (savedCvs.length > 0 || pastAnalyses.length > 0) && <section className="history-section no-print">
-          <h2>Hồ sơ và báo cáo gần đây</h2>
-          <div className="history-grid">
-            <GlassCard><h3>CV đã lưu</h3>
-              {savedCvs.map((item) => <button key={item.id} type="button" className="history-item"
-                onClick={() => session && void loadCv(item.id, session.access_token, true)}>
-                <strong>{item.original_name}</strong><small>{new Date(item.created_at).toLocaleDateString("vi-VN")}</small>
-              </button>)}
-            </GlassCard>
-            <GlassCard><h3>Phân tích đã lưu</h3>
-              {pastAnalyses.map((item) => <button key={item.id} type="button" className="history-item"
-                onClick={() => void openAnalysis(item.id)}>
-                <strong>Phù hợp {item.rci_score}%</strong><small>{new Date(item.created_at).toLocaleDateString("vi-VN")} · {item.jd_text.slice(0, 65)}...</small>
-              </button>)}
-            </GlassCard>
-          </div>
-        </section>}
-
-        {quality && <section className="quality-section">
-          <GlassCard>
-            <div className="quality-heading"><div><p className="eyebrow">CV EVALUATION</p><h2>Chất lượng CV</h2></div>
-              <strong>{quality.quality_score}/100</strong></div>
-            <p>{quality.note ?? "Điểm dựa trên độ đầy đủ, độ rõ ràng và cấu trúc văn bản."}</p>
-            {quality.issues.length ? <ul className="quality-issues">{quality.issues.map((issue, index) =>
-              <li key={index}><strong>{issue.finding}</strong><span> — {issue.suggestion}</span>
-                {issue.evidence_quote && <blockquote>“{issue.evidence_quote}”</blockquote>}</li>)}</ul>
-              : <p>Chưa phát hiện vấn đề rõ ràng trong nội dung CV.</p>}
-          </GlassCard>
-        </section>}
-
-        {workspace && cvData && (
-        <div className="split-layout">
-        <div className="split-left no-print">
-          <div className="workspace-toolbar">
-            <button type="button" className="text-button" onClick={() => setEditorOpen(false)} disabled={!!analysis}>← Quay lại</button>
-            <div className="toolbar-actions">
-              <button type="button" className="secondary-button" disabled={busy || rewriting !== null || !analysis} onClick={() => void optimizeAll()}>✨ Tối ưu toàn bộ CV</button>
-              <button type="button" className="primary-button" disabled={busy || rewriting !== null || jd.trim().length < 50} onClick={() => void reanalyze()}>{busy ? "Đang phân tích..." : analysis ? "↻ Phân tích lại" : "✦ Phân tích bằng AI"}</button>
-            </div>
-          </div>
-          <details className="jd-details" open={!analysis}>
-            <summary>Mô tả công việc (JD)</summary>
-            <textarea value={jd} maxLength={20000} onChange={(event) => setJd(event.target.value)} placeholder="Dán nội dung JD vào đây (tối thiểu 50 ký tự)..." className="jd-input" />
-          </details>
-          {undo && <p className="notice notice-info">AI vừa sửa một mục và đã đánh dấu trên CV. <button type="button" className="text-button" onClick={revertRewrite}>Hoàn tác</button> <button type="button" className="text-button" onClick={() => { setUndo(null); setHighlight(null); }}>Giữ thay đổi</button></p>}
-        </div>
-        <div className="split-left">
-        {analysis && (
-          <section className="results-section">
-            <div className="results-heading">
-              <div><p className="eyebrow">BÁO CÁO PHÂN TÍCH</p><h2>Phân tích mức độ phù hợp</h2><p>Đối chiếu theo Rubric 4 tầng tiêu chuẩn.</p></div>
-              <div className="score-summary"><span>MỨC ĐỘ BAO PHỦ</span><strong>{prevScore !== null && prevScore !== analysis.rci_score && <small className="score-prev">{prevScore}% →</small>}{analysis.rci_score}<small>%</small></strong></div>
-            </div>
-
-            {analysis.scoring_breakdown && <div className="scoring-breakdown">
-              <strong>Điểm theo quy tắc cố định</strong>
-              {analysis.scoring_breakdown.map((item) => <p key={item.category}>
-                <span>{item.category === "skills" ? "Kỹ năng" : item.category === "experience" ? "Kinh nghiệm / dự án" : "Học vấn"} · trọng số {item.weight}%</span>
-                <b>{item.matched}/{item.total} yêu cầu · {item.score}%</b>
-              </p>)}
-            </div>}
-
-            <div className="results-grid">
-              <GlassCard className="result-card">
-                <div className="section-heading"><span className="layer-icon layer-skills">✣</span><h3>Tầng 1: Kỹ năng</h3></div>
-                <div className="result-inset">
-                  <p className="result-label positive-label">ĐÃ CÓ TRONG CV</p>
-                  <div className="pill-list">{analysis.layer_1_skills.matched.length ? analysis.layer_1_skills.matched.map((item) => <span key={item} className="pill pill-green">✓ {item}</span>) : <span className="empty-copy">Chưa thấy kỹ năng trùng khớp.</span>}</div>
-                </div>
-                {analysis.layer_1_skills.evidence.length > 0 && <div className="evidence-list">{analysis.layer_1_skills.evidence.map((item, index) => <blockquote key={`${item.claim}-${index}`} className="evidence-quote"><strong>{item.claim}:</strong> “{item.quote}”</blockquote>)}</div>}
-                <div className="result-inset missing-inset">
-                  <p className="result-label missing-label">CÒN THIẾU · CẦN BỔ SUNG</p>
-                  <div className="pill-list">{analysis.layer_1_skills.missing.length ? analysis.layer_1_skills.missing.map((item) => <span key={item} className="pill pill-amber">＋ {item}</span>) : <span className="empty-copy">Không có kỹ năng nổi bật bị thiếu.</span>}</div>
-                </div>
-              </GlassCard>
-
-              <GlassCard className="result-card">
-                <div className="section-heading"><span className="layer-icon layer-projects">▣</span><h3>Tầng 2: Dự án & bằng chứng</h3></div>
-                {analysis.layer_2_projects.length ? <div className="project-list">
-                  {analysis.layer_2_projects.map((project, index) => (
-                    <article key={`${project.project_name}-${index}`} className="project-item">
-                      <strong>{project.project_name}</strong>
-                      <p><b>Điểm cần bổ sung:</b> {project.issue}</p>
-                      <p><b>Gợi ý:</b> {project.suggestion}</p>
-                      <blockquote className="evidence-quote">Bằng chứng từ CV: “{project.evidence}”</blockquote>
-                      {(() => {
-                        const target = cvData.projects.findIndex((item) => {
-                          const a = item.name.trim().toLowerCase();
-                          const b = project.project_name.trim().toLowerCase();
-                          return a !== "" && (a.includes(b) || b.includes(a));
-                        });
-                        return target >= 0 ? <button type="button" className="mini-ai" disabled={rewriting !== null} onClick={() => void rewriteOne("projects", target, `${project.issue}. ${project.suggestion}`)}>{rewriting === `projects-${target}` ? "Đang viết..." : "✨ AI viết lại mục này"}</button> : null;
-                      })()}
-                    </article>
-                  ))}
-                </div> : <p className="empty-copy">AI chưa tìm thấy dự án cụ thể trong CV để nhận xét.</p>}
-              </GlassCard>
-
-              <GlassCard className="result-card">
-                <div className="section-heading"><span className="layer-icon layer-education">◇</span><h3>Tầng 3: Học vấn & bằng cấp</h3></div>
-                <div className="education-grid">
-                  <div className={`education-item ${analysis.layer_3_education.major_matched ? "is-matched" : "is-unmatched"}`}>
-                    <span>{analysis.layer_3_education.major_matched ? "✓" : "○"}</span><strong>Chuyên ngành</strong><small>{analysis.layer_3_education.major_matched ? "Phù hợp yêu cầu JD" : "Chưa có bằng chứng phù hợp"}</small>
-                  </div>
-                  <div className={`education-item ${analysis.layer_3_education.english_matched ? "is-matched" : "is-unmatched"}`}>
-                    <span>{analysis.layer_3_education.english_matched ? "✓" : "○"}</span><strong>Ngoại ngữ</strong><small>{analysis.layer_3_education.english_matched ? "Đáp ứng yêu cầu tiếng Anh" : "Chưa có bằng chứng phù hợp"}</small>
-                  </div>
-                </div>
-                <p className="education-notes">{analysis.layer_3_education.notes}</p>
-                {analysis.layer_3_education.evidence.map((item, index) => <blockquote key={`${item.claim}-${index}`} className="evidence-quote"><strong>{item.claim}:</strong> “{item.quote}”</blockquote>)}
-              </GlassCard>
-
-              <GlassCard className="result-card interview-card">
-                <div className="interview-title">
-                  <div className="section-heading"><span className="layer-icon layer-interview">☏</span><h3>Tầng 4: Luyện phỏng vấn</h3></div>
-                  {!analysis.layer_4_mock && profile?.payments_enabled && <span className="premium-badge">PREMIUM</span>}
-                </div>
-                {analysis.layer_4_mock ? (
-                  <><ol className="question-list">{analysis.layer_4_mock.map((question, index) => <li key={`${index}-${question}`}><span>{String(index + 1).padStart(2, "0")}</span>{question}</li>)}</ol>
-                    <button type="button" className="primary-button" disabled={busy} onClick={() => void startInterview()}>🎙 Bắt đầu luyện trả lời</button></>
-                ) : (
-                  <>
-                    <p className="interview-copy">Tạo 3 câu hỏi phỏng vấn mô phỏng theo kỹ năng và dự án trong CV.</p>
-                    {profile?.payments_enabled
-                      ? <button disabled={busy || !!payment} onClick={() => void createPayment()} className="unlock-button">♙ &nbsp; Mở khóa phiên phỏng vấn · 29.000đ</button>
-                      : profile?.payments_enabled === false
-                        ? <button disabled={busy} onClick={() => void unlockInterview()} className="primary-button">Tạo câu hỏi và luyện miễn phí</button>
-                        : null}
-                  </>
-                )}
-              </GlassCard>
-            </div>
-            <p className="results-disclaimer">♧ &nbsp; Dữ liệu liên hệ được ẩn danh. Điểm số không phản ánh xác suất trúng tuyển.</p>
+      {(savedCvs.length > 0 || pastAnalyses.length > 0) && <section className="history-section no-print">
+        <div className="history-heading"><h2>Hồ sơ và báo cáo gần đây</h2><Link href="/history" className="inline-link">Xem tất cả</Link></div>
+        <div className="history-grid">
+          <section className="soft-card"><h3>CV đã lưu</h3>
+            {savedCvs.slice(0, RECENT_LIMIT).map((item) => <Link key={item.id} href={`/cv/${item.id}`} className="history-item">
+              <strong>{item.original_name}</strong><small>{new Date(item.created_at).toLocaleDateString("vi-VN")}</small>
+            </Link>)}
           </section>
-        )}
+          <section className="soft-card"><h3>Phân tích đã lưu</h3>
+            {pastAnalyses.slice(0, RECENT_LIMIT).map((item) => <Link key={item.id} href={`/analysis/${item.id}`} className="history-item">
+              <strong>Phù hợp {item.rci_score}%</strong><small>{new Date(item.created_at).toLocaleDateString("vi-VN")} · {analysisLabel(item)}</small>
+            </Link>)}
+          </section>
         </div>
-        <aside className="split-right">
-          <div className="cv-toolbar no-print">
-            <strong>CV của bạn</strong>
-            <span className={`save-state save-${saveState}`}>{saveState === "saved" ? "✓ Đã lưu" : saveState === "saving" ? "Đang lưu..." : saveState === "error" ? "Lỗi lưu · sẽ thử lại" : "Chưa lưu..."}</span>
-            <button type="button" className="secondary-button" onClick={exportPdf}>⬇ Xuất PDF</button>
-          </div>
-          <div className="cv-scroll">
-            <CvPaper cv={cvData} onChange={changeCv} highlight={highlight} rewriting={rewriting} onRewrite={(section, index) => void rewriteOne(section, index)} />
-          </div>
-        </aside>
-        </div>
-        )}
-
-        <footer className="site-footer no-print"><span>AI Career Ready · Phân tích có trách nhiệm, không bịa đặt thông tin hồ sơ.</span><span>{profile ? (profile.payments_enabled ? `Còn lại ${profile.credits} credits` : "Dùng thử miễn phí") : ""}</span></footer>
-      </div>
-    </main>
+      </section>}
+    </>
   );
 }

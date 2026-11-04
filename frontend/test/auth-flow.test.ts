@@ -4,6 +4,7 @@ import {
   getAuthErrorMessage,
   isEmailNotConfirmed,
   isEmailOtp,
+  isExistingAccountSignup,
   normalizeEmail,
   OTP_RESEND_SECONDS,
   parsePendingVerification,
@@ -105,6 +106,19 @@ test("expired code, email quota and request rate errors produce distinct guidanc
     getAuthErrorMessage({ code: "over_request_rate_limit" }),
   );
   assert.match(getAuthErrorMessage({ code: "email_address_not_authorized" }), /cấu hình gửi thư/);
+});
+
+test("SMTP failures say no code was sent without rendering the upstream message", () => {
+  const text = getAuthErrorMessage({ code: "unexpected_failure", status: 500, message: "Error sending confirmation email" });
+  assert.match(text, /chưa có mã OTP nào được gửi/);
+  assert.equal(text.includes("Error sending"), false);
+});
+
+test("only a signup user with an empty identities list counts as an existing account", () => {
+  assert.equal(isExistingAccountSignup({ identities: [] }), true);
+  assert.equal(isExistingAccountSignup({ identities: [{ provider: "email" }] }), false);
+  assert.equal(isExistingAccountSignup({}), false);
+  assert.equal(isExistingAccountSignup(null), false);
 });
 
 test("known auth errors remain actionable without rendering upstream messages", () => {

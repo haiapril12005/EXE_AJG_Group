@@ -16,6 +16,17 @@ const USER = {
   identities: [{ id: USER_ID, user_id: USER_ID, identity_id: USER_ID, provider: "email" }],
 };
 
+const ANALYSIS = {
+  analysis_id: "00000000-0000-4000-8000-000000000003",
+  rci_score: 75,
+  layer_1_skills: { matched: ["TypeScript"], missing: [], evidence: [] },
+  layer_2_projects: [],
+  layer_3_education: { major_matched: false, english_matched: false, notes: "No evidence", evidence: [] },
+  layer_4_mock: ["Question one?", "Question two?", "Question three?"],
+  is_premium_unlocked: true,
+  credits_remaining: null,
+};
+
 type MockResponse = { status: number; body: unknown };
 type RecordedRequest = { path: string; body: Record<string, unknown> };
 type AuthMocks = {
@@ -111,18 +122,14 @@ async function mockServices(context: BrowserContext, options: AuthMocks = {}) {
             personal_info: { name: "OTP Demo", email: "", phone: "", title: "Backend Developer" },
             summary: "Built REST APIs with TypeScript.",
             education: [], experience: [], projects: [], skills: ["TypeScript"],
+            languages: [], certificates: [], links: [],
           } } });
+        case `/api/cv/${CV_ID}/evaluations`:
+          return reply(route, { status: 200, body: { evaluations: [] } });
         case "/api/analyze":
-          return reply(route, { status: 200, body: {
-            analysis_id: "00000000-0000-4000-8000-000000000003",
-            rci_score: 75,
-            layer_1_skills: { matched: ["TypeScript"], missing: [], evidence: [] },
-            layer_2_projects: [],
-            layer_3_education: { major_matched: false, english_matched: false, notes: "No evidence", evidence: [] },
-            layer_4_mock: ["Question one?", "Question two?", "Question three?"],
-            is_premium_unlocked: true,
-            credits_remaining: null,
-          } });
+          return reply(route, { status: 200, body: ANALYSIS });
+        case `/api/analyses/${ANALYSIS.analysis_id}`:
+          return reply(route, { status: 200, body: { analysis: { ...ANALYSIS, cv_id: CV_ID, jd_text: "Saved JD text" } } });
         default:
           unexpected.push(request.url());
           return reply(route, { status: 500, body: { error: "Unmocked API request" } });
@@ -158,8 +165,8 @@ async function pendingStorage(page: Page) {
   return page.evaluate((key) => sessionStorage.getItem(key), STORAGE_KEY);
 }
 
-test("signup verifies an entered OTP, rejects expired code, then opens the authenticated app", async ({ page, context }, testInfo) => {
-  const { calls, unexpected } = await mockServices(context);
+test("signup verifies an entered OTP, rejects expired code, then requires a password login", async ({ page, context }, testInfo) => {
+  const { calls, unexpected } = await mockServices(context, { login: { status: 200, body: confirmedSession() } });
   await openSignup(page, "Demo@EXAMPLE.COM");
   await submitSignup(page);
   await expect(page.getByRole("heading", { name: "Xác nhận email" })).toBeVisible();
@@ -174,13 +181,23 @@ test("signup verifies an entered OTP, rejects expired code, then opens the authe
 
   const otp = page.getByLabel("Mã xác nhận OTP");
   await otp.fill("999999");
-  await page.getByRole("button", { name: "Xác nhận và đăng nhập" }).click();
+  await page.getByRole("button", { name: "Xác nhận mã OTP" }).click();
   await expect(page.getByRole("main").getByRole("alert")).toContainText("không đúng hoặc đã hết hạn");
   await expect(page.getByRole("heading", { name: "Xác nhận email" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Đăng xuất" })).toHaveCount(0);
 
   await otp.fill("000123");
-  await page.getByRole("button", { name: "Xác nhận và đăng nhập" }).click();
+  await page.getByRole("button", { name: "Xác nhận mã OTP" }).click();
+  await expect(page.getByRole("heading", { name: "Chào mừng trở lại" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Email đã được xác nhận");
+  await expect(page.getByRole("button", { name: "Đăng xuất" })).toHaveCount(0);
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue(EMAIL);
+  await expect(page.getByLabel("Mật khẩu", { exact: true })).toHaveValue("");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Chào mừng trở lại" })).toBeVisible();
+  await page.getByLabel("Email", { exact: true }).fill(EMAIL);
+  await page.getByLabel("Mật khẩu", { exact: true }).fill(PASSWORD);
+  await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
   await expect(page.getByRole("button", { name: "Đăng xuất" })).toBeVisible();
   await expect(page.getByText("OTP Demo", { exact: true })).toBeVisible();
   expect(calls.filter((call) => call.path.endsWith("/verify")).map((call) => ({
@@ -234,8 +251,9 @@ test("unconfirmed password login offers resend and verification without another 
   await page.getByRole("button", { name: "Gửi lại mã", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Đã yêu cầu gửi lại mã");
   await page.getByLabel("Mã xác nhận OTP").fill("000123");
-  await page.getByRole("button", { name: "Xác nhận và đăng nhập" }).click();
-  await expect(page.getByRole("button", { name: "Đăng xuất" })).toBeVisible();
+  await page.getByRole("button", { name: "Xác nhận mã OTP" }).click();
+  await expect(page.getByRole("heading", { name: "Chào mừng trở lại" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Đăng xuất" })).toHaveCount(0);
   expect(calls.filter((call) => call.path.endsWith("/signup"))).toHaveLength(0);
   expect(calls.find((call) => call.path.endsWith("/token"))?.body).toMatchObject({ email: EMAIL, password: PASSWORD });
   expect(unexpected).toEqual([]);
@@ -273,19 +291,47 @@ test("resend HTTP 429 keeps verification available and never shows a success not
   expect(unexpected).toEqual([]);
 });
 
-test("obfuscated existing-user signup gives generic guidance without claiming delivery", async ({ page, context }) => {
+test("existing-account signup returns to login instead of waiting for an OTP that is never sent", async ({ page, context }) => {
   const { unexpected } = await mockServices(context, {
     signup: { status: 200, body: { ...USER, identities: [] } },
   });
   await openSignup(page);
   await submitSignup(page);
-  await expect(page.getByRole("status")).toContainText("Yêu cầu đăng ký đã được tiếp nhận");
-  await expect(page.getByRole("status")).toContainText("Nếu email đã có tài khoản");
-  await expect(page.getByRole("status")).not.toContainText("Đã gửi");
-  await page.getByRole("button", { name: "Quay lại đăng nhập" }).click();
+  await expect(page.getByRole("status")).toContainText("không có mã OTP nào được gửi");
   await expect(page.getByRole("heading", { name: "Chào mừng trở lại" })).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue(EMAIL);
   await expect(page.getByLabel("Mật khẩu", { exact: true })).toHaveValue("");
   expect(await pendingStorage(page)).toBeNull();
+  expect(unexpected).toEqual([]);
+});
+
+test("SMTP failure during signup stays on the form and says no code was sent", async ({ page, context }) => {
+  const { unexpected } = await mockServices(context, {
+    signup: { status: 500, body: { code: 500, error_code: "unexpected_failure", msg: "Error sending confirmation email" } },
+  });
+  await openSignup(page);
+  await submitSignup(page);
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("chưa có mã OTP nào được gửi");
+  await expect(page.getByRole("heading", { name: "Tạo tài khoản" })).toBeVisible();
+  expect(await pendingStorage(page)).toBeNull();
+  expect(unexpected).toEqual([]);
+});
+
+test("password toggle reveals and hides the value and resets when switching forms", async ({ page, context }, testInfo) => {
+  const { unexpected } = await mockServices(context);
+  await openSignup(page);
+  const password = page.getByLabel("Mật khẩu", { exact: true });
+  await expect(password).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "Hiện mật khẩu" }).click();
+  await expect(password).toHaveAttribute("type", "text");
+  await expect(password).toHaveValue(PASSWORD);
+  await page.screenshot({ path: testInfo.outputPath("password-visible.png"), fullPage: true });
+  await page.getByRole("button", { name: "Ẩn mật khẩu" }).click();
+  await expect(password).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "Hiện mật khẩu" }).click();
+  await page.locator(".auth-switch").getByRole("button", { name: "Đăng nhập", exact: true }).click();
+  await expect(page.getByLabel("Mật khẩu", { exact: true })).toHaveAttribute("type", "password");
+  await page.getByLabel("Mật khẩu", { exact: true }).press("Enter");
   expect(unexpected).toEqual([]);
 });
 
