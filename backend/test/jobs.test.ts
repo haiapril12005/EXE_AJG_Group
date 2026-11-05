@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mapGreenhouseJobs, mapSmartRecruitersJob, type JobSource } from "../src/jobs/connectors";
+import { fetchJobSource, mapAshbyJobs, mapGreenhouseJobs, mapLeverJobs, mapSmartRecruitersJob, type JobSource } from "../src/jobs/connectors";
 import { cityOf, htmlToText, isSyncDue, isVietnamLocation, JD_MAX_LENGTH, planMissedScans } from "../src/jobs/normalize";
 
 const body = "Build backend services with TypeScript and PostgreSQL for a growing product team.";
 const greenhouse: JobSource = { type: "greenhouse", key: "axon", company: "Axon" };
 const smartRecruiters: JobSource = { type: "smartrecruiters", key: "Endava", company: "Endava" };
+const lever: JobSource = { type: "lever", key: "lalamove", company: "Lalamove" };
+const ashby: JobSource = { type: "ashby", key: "acme", company: "Acme" };
 
 test("HTML, escaped HTML and entities become readable text", () => {
   assert.equal(htmlToText("<p>Hello&nbsp;<b>team</b></p><ul><li>One</li><li>Two &amp; three</li></ul>"),
@@ -86,4 +88,71 @@ test("the catalog syncs when empty or older than the interval, not on every rest
   assert.equal(isSyncDue("2026-11-04T06:00:00Z", now, 12 * hour), false);
   assert.equal(isSyncDue("2026-11-03T23:59:00Z", now, 12 * hour), true);
   assert.equal(isSyncDue("not a date", now, 12 * hour), true);
+});
+
+test("Lever keeps postings with any Vietnam location and merges description, lists and closing text", () => {
+  const result = mapLeverJobs(lever, [
+    { id: "a1", text: "Driver Operations Associate", hostedUrl: "https://jobs.lever.co/lalamove/a1",
+      createdAt: Date.parse("2026-10-02T00:00:00Z"),
+      categories: { location: "Singapore", allLocations: ["Singapore", "Ho Chi Minh City"] },
+      description: `<div>${body}</div>`,
+      lists: [{ text: "Requirements", content: "<li>SQL</li><li>English</li>" }],
+      additional: "<p>Apply now</p>" },
+    { id: "a2", text: "Remote in Vietnam", hostedUrl: "https://jobs.lever.co/lalamove/a2", country: "VN",
+      categories: { location: "Remote" }, description: body },
+    { id: "a3", text: "Elsewhere", hostedUrl: "https://jobs.lever.co/lalamove/a3", country: "SG",
+      categories: { location: "Singapore" }, description: body }
+  ]);
+  assert.deepEqual(result.seenIds, ["a1", "a2"]);
+  const [first, second] = result.jobs;
+  assert.equal(first.source, "lever");
+  assert.equal(first.location, "Ho Chi Minh City");
+  assert.equal(first.city, "Hồ Chí Minh");
+  assert.equal(first.posted_at, "2026-10-02T00:00:00.000Z");
+  assert.equal(first.description, `${body}\nRequirements\n- SQL\n- English\nApply now`);
+  assert.equal(second.location, "Remote");
+  assert.equal(second.posted_at, null);
+});
+
+test("Ashby keeps listed Vietnam postings, including ones only in a secondary location", () => {
+  const result = mapAshbyJobs(ashby, [
+    { id: "b1", title: "Backend Engineer", jobUrl: "https://jobs.ashbyhq.com/acme/b1", isListed: true,
+      publishedAt: "2026-10-05T08:00:00.000+00:00", location: "Hanoi", descriptionHtml: `<p>${body}</p>` },
+    { id: "b2", title: "Data Analyst", jobUrl: "https://jobs.ashbyhq.com/acme/b2", location: "Singapore",
+      secondaryLocations: [{ location: "Remote", address: { addressCountry: "Vietnam" } }], descriptionPlain: body },
+    { id: "b3", title: "Hidden", jobUrl: "https://jobs.ashbyhq.com/acme/b3", isListed: false, location: "Hanoi", descriptionHtml: body },
+    { id: "b5", title: "Web3 Security Engineer", jobUrl: "https://jobs.ashbyhq.com/acme/b5", location: "Vietnam",
+      address: { postalAddress: { addressLocality: "Ho Chi Minh City", addressCountry: "Vietnam" } }, descriptionHtml: body },
+    { id: "b4", title: "Elsewhere", jobUrl: "https://jobs.ashbyhq.com/acme/b4", location: "Singapore",
+      address: { postalAddress: { addressCountry: "Singapore" } }, descriptionHtml: body }
+  ]);
+  assert.deepEqual(result.seenIds, ["b1", "b2", "b5"]);
+  assert.deepEqual(result.jobs.map((job) => [job.source, job.location, job.city]), [
+    ["ashby", "Hanoi", "Hà Nội"],
+    ["ashby", "Remote, Vietnam", "Việt Nam"],
+    ["ashby", "Ho Chi Minh City, Vietnam", "Hồ Chí Minh"]
+  ]);
+  assert.equal(result.jobs[0].posted_at, "2026-10-05T08:00:00.000+00:00");
+  assert.equal(result.jobs[1].description, body);
+});
+
+test("each source type reaches its own public job board API", async () => {
+  const realFetch = globalThis.fetch;
+  const requested: string[] = [];
+  globalThis.fetch = (async (url: string | URL) => {
+    requested.push(String(url));
+    return new Response(JSON.stringify(String(url).includes("lever") ? [] : { jobs: [] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await fetchJobSource({ type: "lever", key: "lalamove", company: "Lalamove" });
+    await fetchJobSource({ type: "ashby", key: "acme co", company: "Acme" });
+    await fetchJobSource({ type: "greenhouse", key: "axon", company: "Axon" });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(requested, [
+    "https://api.lever.co/v0/postings/lalamove?mode=json",
+    "https://api.ashbyhq.com/posting-api/job-board/acme%20co",
+    "https://boards-api.greenhouse.io/v1/boards/axon/jobs?content=true"
+  ]);
 });

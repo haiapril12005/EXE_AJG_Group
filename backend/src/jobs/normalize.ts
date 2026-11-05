@@ -4,7 +4,7 @@ import { maskText } from "../cvData";
 export const JD_MAX_LENGTH = 20_000;
 const JD_MIN_LENGTH = 50;
 
-export type JobSourceType = "greenhouse" | "smartrecruiters";
+export type JobSourceType = "greenhouse" | "smartrecruiters" | "lever" | "ashby";
 
 export type NormalizedJob = {
   source: JobSourceType;

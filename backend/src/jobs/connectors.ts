@@ -1,5 +1,5 @@
 import { HttpError } from "../errors";
-import { isVietnamLocation, normalizeJob, type JobSourceType, type NormalizedJob } from "./normalize";
+import { cityOf, isVietnamLocation, normalizeJob, type JobSourceType, type NormalizedJob } from "./normalize";
 
 export type JobSource = { type: JobSourceType; key: string; company: string };
 
@@ -13,7 +13,11 @@ export const JOB_SOURCES: JobSource[] = [
   { type: "greenhouse", key: "axon", company: "Axon" },
   { type: "greenhouse", key: "binance", company: "Binance" },
   { type: "greenhouse", key: "thoughtworks", company: "Thoughtworks" },
-  { type: "greenhouse", key: "agoda", company: "Agoda" }
+  { type: "greenhouse", key: "agoda", company: "Agoda" },
+  { type: "lever", key: "lalamove", company: "Lalamove" },
+  { type: "lever", key: "ninjavan", company: "Ninja Van" },
+  { type: "ashby", key: "airwallex", company: "Airwallex" },
+  { type: "ashby", key: "skymavis", company: "Sky Mavis" }
 ];
 
 /** `seenIds` also lists postings whose details failed, so they are not treated as removed. */
@@ -125,6 +129,121 @@ async function fetchSmartRecruiters(source: JobSource): Promise<ConnectorResult>
   return { jobs, seenIds: ids, skipped };
 }
 
+type LeverPosting = {
+  id: string;
+  text: string;
+  hostedUrl: string;
+  createdAt?: number;
+  country?: string;
+  categories?: { location?: string; allLocations?: string[] };
+  description?: string;
+  lists?: { text?: string; content?: string }[];
+  additional?: string;
+};
+
+/** Lever lists one location per posting plus `allLocations`; the first Vietnam one is shown. */
+export function mapLeverJobs(source: JobSource, postings: LeverPosting[]): ConnectorResult {
+  const locationOf = (posting: LeverPosting) => {
+    const locations = [posting.categories?.location, ...(posting.categories?.allLocations ?? [])]
+      .filter((location): location is string => Boolean(location));
+    return locations.find(isVietnamLocation) ?? (posting.country === "VN" ? locations[0] ?? "Vietnam" : null);
+  };
+  const inVietnam = postings.flatMap((posting) => {
+    const location = locationOf(posting);
+    return location === null ? [] : [{ posting, location }];
+  });
+  const mapped = inVietnam.map(({ posting, location }) => normalizeJob({
+    source: "lever",
+    source_key: source.key,
+    external_id: posting.id,
+    company: source.company,
+    title: posting.text,
+    location,
+    url: posting.hostedUrl,
+    posted_at: typeof posting.createdAt === "number" ? new Date(posting.createdAt).toISOString() : null,
+    html: [
+      posting.description ?? "",
+      ...(posting.lists ?? []).map((list) => `<h3>${list.text ?? ""}</h3><ul>${list.content ?? ""}</ul>`),
+      posting.additional ?? ""
+    ].join("\n")
+  }));
+  const usable = mapped.filter((job) => job !== null);
+  return { jobs: usable, seenIds: inVietnam.map(({ posting }) => posting.id), skipped: mapped.length - usable.length };
+}
+
+async function fetchLever(source: JobSource): Promise<ConnectorResult> {
+  const postings = await getJson<LeverPosting[]>(
+    `https://api.lever.co/v0/postings/${encodeURIComponent(source.key)}?mode=json`
+  );
+  return mapLeverJobs(source, postings);
+}
+
+type AshbyAddress = { addressLocality?: string; addressCountry?: string };
+type AshbyJob = {
+  id: string;
+  title: string;
+  jobUrl: string;
+  isListed?: boolean;
+  publishedAt?: string | null;
+  location?: string;
+  address?: { postalAddress?: AshbyAddress };
+  secondaryLocations?: { location?: string; address?: AshbyAddress }[];
+  descriptionHtml?: string;
+  descriptionPlain?: string;
+};
+
+/** Ashby gives a primary location plus secondary ones, each with a structured address. */
+export function mapAshbyJobs(source: JobSource, jobs: AshbyJob[]): ConnectorResult {
+  const locationOf = (job: AshbyJob) => {
+    const places = [
+      { location: job.location, address: job.address?.postalAddress },
+      ...(job.secondaryLocations ?? [])
+    ];
+    for (const { location = "", address } of places) {
+      const country = address?.addressCountry ?? "";
+      if (!isVietnamLocation([location, address?.addressLocality, country].join(", ")) && country.toUpperCase() !== "VN") continue;
+      // "Vietnam" alone hides the city that the structured address still carries.
+      const locality = address?.addressLocality ?? "";
+      if (location && cityOf(location) !== "Việt Nam") return location;
+      if (locality && cityOf(locality) !== "Việt Nam") return `${locality}, ${location || "Vietnam"}`;
+      return isVietnamLocation(location) ? location : [location, "Vietnam"].filter(Boolean).join(", ");
+    }
+    return null;
+  };
+  // Unlisted postings are reachable only by direct link, so the catalog leaves them out.
+  const inVietnam = jobs.flatMap((job) => {
+    const location = job.isListed === false ? null : locationOf(job);
+    return location === null ? [] : [{ job, location }];
+  });
+  const mapped = inVietnam.map(({ job, location }) => normalizeJob({
+    source: "ashby",
+    source_key: source.key,
+    external_id: job.id,
+    company: source.company,
+    title: job.title,
+    location,
+    url: job.jobUrl,
+    posted_at: job.publishedAt ?? null,
+    html: job.descriptionHtml ?? job.descriptionPlain ?? ""
+  }));
+  const usable = mapped.filter((job) => job !== null);
+  return { jobs: usable, seenIds: inVietnam.map(({ job }) => job.id), skipped: mapped.length - usable.length };
+}
+
+async function fetchAshby(source: JobSource): Promise<ConnectorResult> {
+  const { jobs } = await getJson<{ jobs: AshbyJob[] }>(
+    `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(source.key)}`
+  );
+  return mapAshbyJobs(source, jobs);
+}
+
+const FETCHERS: Record<JobSourceType, (source: JobSource) => Promise<ConnectorResult>> = {
+  greenhouse: fetchGreenhouse,
+  smartrecruiters: fetchSmartRecruiters,
+  lever: fetchLever,
+  ashby: fetchAshby
+};
+
 export function fetchJobSource(source: JobSource): Promise<ConnectorResult> {
-  return source.type === "greenhouse" ? fetchGreenhouse(source) : fetchSmartRecruiters(source);
+  return FETCHERS[source.type](source);
 }

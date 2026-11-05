@@ -37,6 +37,14 @@ async function storeSource(source: JobSource, jobs: Awaited<ReturnType<typeof fe
   return { missed: strike.length, hidden: hide.length };
 }
 
+// Supabase errors are plain objects, so `instanceof Error` alone would print "[object Object]".
+function describeSyncError(error: unknown): string {
+  const { code, message } = (error ?? {}) as { code?: string; message?: string };
+  // 23514: the source check constraint predates this source type.
+  if (code === "23514") return "the database does not accept this source yet; run supabase/migrations/006_job_sources_lever_ashby.sql";
+  return message ?? String(error);
+}
+
 export async function syncJobs({ dryRun }: { dryRun: boolean }): Promise<boolean> {
   let healthy = true;
   for (const source of JOB_SOURCES) {
@@ -51,7 +59,7 @@ export async function syncJobs({ dryRun }: { dryRun: boolean }): Promise<boolean
       console.log(`${label}: ${result.jobs.length} stored, ${result.skipped} skipped, ${missed} missing, ${hidden} hidden`);
     } catch (error) {
       healthy = false;
-      console.error(`${label}: failed`, error instanceof Error ? error.message : error);
+      console.error(`${label}: failed`, describeSyncError(error));
     }
   }
   return healthy;
