@@ -133,7 +133,9 @@ router.post("/cv/upload", requireAuth, upload.single("file"), async (req: Authen
       throw new HttpError(400, "The uploaded file is not a valid PDF");
     }
 
-    const pdfParse = (await import("pdf-parse")).default;
+    // The package entry runs a debug self-test when loaded through import() (as the built API
+    // does), reading a test PDF that is not installed; the library file has no such code.
+    const pdfParse = (await import("pdf-parse/lib/pdf-parse.js")).default;
     let parsed: Awaited<ReturnType<typeof pdfParse>>;
     try {
       parsed = await pdfParse(file.buffer);

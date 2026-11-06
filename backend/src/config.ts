@@ -11,8 +11,14 @@ const optionalEnvUrl = z.preprocess(
 );
 
 const environmentSchema = z.object({
-  PORT: z.coerce.number().int().positive().default(4000),
+  // One port serves both the website and /api.
+  PORT: z.coerce.number().int().positive().default(3000),
   WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
+  // Reverse proxies between the user and the API (1 on Render); 0 when the API is reached directly.
+  TRUST_PROXY: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.coerce.number().int().min(0).max(10).default(0)
+  ),
   SUPABASE_URL: z.string().url(),
   SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
   SUPABASE_ANON_KEY: z.string().min(1).optional(),

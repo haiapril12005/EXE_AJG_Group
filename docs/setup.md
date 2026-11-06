@@ -45,7 +45,7 @@ Copy-Item backend/.env.example backend/.env
 
 Điền `GEMINI_API_KEY` tại `backend/.env`. Model mặc định: `gemini-3.6-flash` (phân tích và người phỏng vấn), `gemini-3.5-transcribe` (nhận dạng giọng nói), `gemini-3.8-flash-lite-tts` (đọc câu hỏi). Có thể thay bằng model tương thích qua các biến `GEMINI_MODEL`, `GEMINI_STT_MODEL`, `GEMINI_TTS_MODEL`; model phải khả dụng với API key và khu vực sử dụng.
 
-Để thử miễn phí, **để trống cả ba biến `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`**. Phân tích CV–JD và mock interview khi đó không trừ credit và giao diện không hiện nút mua lượt. Nếu sau này bật thu phí, điền đủ ba biến cùng URL trả về/hủy, rồi cấu hình webhook công khai tới `https://<api-host>/api/payment/webhook`.
+Để thử miễn phí, **để trống cả ba biến `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`**. Phân tích CV–JD và mock interview khi đó không trừ credit và giao diện không hiện nút mua lượt. Nếu sau này bật thu phí, điền đủ ba biến cùng URL trả về/hủy, rồi cấu hình webhook công khai tới `https://<địa-chỉ-website>/api/payment/webhook`.
 
 ## Chạy và kiểm tra
 
@@ -54,7 +54,7 @@ npm.cmd run db:check
 npm.cmd run dev
 ```
 
-Mở `http://localhost:3000`; API ở `http://localhost:4000`. `http://localhost:4000/health/ready` kiểm tra schema. Nếu `db:check` báo thiếu bảng/cột, chạy migration còn thiếu rồi thử lại. Dùng `npm.cmd run typecheck`, `npm.cmd test`, `npm.cmd run build` trước khi tạo pull request. Build frontend cần các biến `NEXT_PUBLIC_SUPABASE_*`.
+Mở `http://localhost:3000`. Website và API chạy trong cùng một tiến trình, chung cổng `PORT` (mặc định 3000): Express trả lời `/api` và `/health`, mọi đường dẫn khác do Next.js phục vụ. `http://localhost:3000/health/ready` kiểm tra schema. Sửa code backend thì server tự khởi động lại (mất vài giây vì Next.js khởi động lại theo); sửa code frontend thì trang tự cập nhật. Chỉ cần chạy riêng frontend thì dùng `npm.cmd run dev --workspace frontend`, khi đó đặt `NEXT_PUBLIC_API_URL` trỏ tới API đang chạy. Nếu `db:check` báo thiếu bảng/cột, chạy migration còn thiếu rồi thử lại. Dùng `npm.cmd run typecheck`, `npm.cmd test`, `npm.cmd run build` trước khi tạo pull request. Build frontend cần các biến `NEXT_PUBLIC_SUPABASE_*`.
 
 ## Kho việc làm
 

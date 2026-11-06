@@ -23,6 +23,17 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_LENGTH = 128;
+
+/** Checked before the reset code is spent, so a typo does not cost the user a new email. */
+export function newPasswordProblem(password: string, confirmation: string): string | null {
+  if (password.length < PASSWORD_MIN_LENGTH) return `Mật khẩu mới cần ít nhất ${PASSWORD_MIN_LENGTH} ký tự.`;
+  if (password.length > PASSWORD_MAX_LENGTH) return `Mật khẩu mới tối đa ${PASSWORD_MAX_LENGTH} ký tự.`;
+  if (password !== confirmation) return "Hai lần nhập mật khẩu mới chưa khớp.";
+  return null;
+}
+
 export function isEmailNotConfirmed(error: unknown): boolean {
   return asRecord(error)?.code === "email_not_confirmed";
 }
@@ -47,6 +58,7 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   email_provider_disabled: "Đăng nhập bằng email hiện chưa khả dụng. Vui lòng liên hệ nhóm hỗ trợ.",
   weak_password: "Mật khẩu chưa đủ mạnh. Hãy dùng ít nhất 8 ký tự và kết hợp chữ, số, ký tự đặc biệt.",
   email_address_invalid: "Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại.",
+  same_password: "Mật khẩu mới phải khác mật khẩu cũ.",
   unexpected_failure: "Hệ thống chưa xử lý được yêu cầu. Vui lòng thử lại sau.",
 };
 
@@ -56,7 +68,7 @@ export function getAuthErrorMessage(error: unknown): string {
   const message = typeof details?.message === "string" ? details.message : "";
   // Supabase reports SMTP failures as a generic unexpected_failure.
   if (/error sending .*email/i.test(message)) {
-    return "Hệ thống chưa gửi được email xác nhận, nên chưa có mã OTP nào được gửi. Vui lòng thử lại sau hoặc liên hệ nhóm hỗ trợ để kiểm tra cấu hình gửi thư.";
+    return "Hệ thống chưa gửi được email, nên chưa có mã OTP nào được gửi. Vui lòng thử lại sau hoặc liên hệ nhóm hỗ trợ để kiểm tra cấu hình gửi thư.";
   }
   if (Object.prototype.hasOwnProperty.call(AUTH_ERROR_MESSAGES, code)) {
     return AUTH_ERROR_MESSAGES[code];
