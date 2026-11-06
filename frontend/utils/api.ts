@@ -1,4 +1,6 @@
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/$/, "");
+// The API is served from the same address as the website. Set NEXT_PUBLIC_API_URL only to reach
+// an API running elsewhere (the UI tests point it at a mock).
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 export async function api<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}/api${path}`, {

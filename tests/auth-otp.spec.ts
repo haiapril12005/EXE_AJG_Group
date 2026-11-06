@@ -33,6 +33,9 @@ type AuthMocks = {
   signup?: MockResponse;
   login?: MockResponse;
   resend?: MockResponse;
+  recover?: MockResponse;
+  /** Answers to password updates, in order; later updates reuse the last one. */
+  updateUser?: MockResponse[];
 };
 
 function authError(code: string, status = 400): MockResponse {
@@ -73,6 +76,7 @@ async function mockServices(context: BrowserContext, options: AuthMocks = {}) {
   const calls: RecordedRequest[] = [];
   const apiCalls: RecordedRequest[] = [];
   const unexpected: string[] = [];
+  let updates = 0;
   await context.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -87,11 +91,17 @@ async function mockServices(context: BrowserContext, options: AuthMocks = {}) {
           return reply(route, options.login ?? authError("email_not_confirmed"));
         case "/auth/v1/resend":
           return reply(route, options.resend ?? { status: 200, body: {} });
+        case "/auth/v1/recover":
+          return reply(route, options.recover ?? { status: 200, body: {} });
         case "/auth/v1/verify":
           return reply(route, body?.token === "000123"
             ? { status: 200, body: confirmedSession() }
             : authError("otp_expired", 403));
         case "/auth/v1/user":
+          if (request.method() === "PUT") {
+            const answers = options.updateUser ?? [{ status: 200, body: USER }];
+            return reply(route, answers[Math.min(updates++, answers.length - 1)]);
+          }
           return reply(route, { status: 200, body: USER });
         case "/auth/v1/logout":
           return reply(route, { status: 200, body: {} });
@@ -374,5 +384,110 @@ test("selected PDF and JD can start analysis without a separate upload click", a
   await expect(page.getByRole("heading", { name: "Phân tích mức độ phù hợp" })).toBeVisible();
   expect(apiCalls.filter((call) => call.path === "/api/cv/upload")).toHaveLength(1);
   expect(apiCalls.find((call) => call.path === "/api/analyze")?.body).toMatchObject({ cv_id: CV_ID });
+  expect(unexpected).toEqual([]);
+});
+
+async function openForgotPassword(page: Page) {
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("Demo@Example.COM");
+  await page.getByRole("button", { name: "Quên mật khẩu?" }).click();
+  await expect(page.getByRole("heading", { name: "Quên mật khẩu" })).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue("Demo@Example.COM");
+  await page.getByRole("button", { name: "Gửi mã đặt lại mật khẩu" }).click();
+  await expect(page.getByRole("heading", { name: "Đặt lại mật khẩu" })).toBeVisible();
+}
+
+const NEW_PASSWORD = "NewDemoPassword!2027";
+
+test("forgot password sends a code, verifies it as recovery, sets the new password and returns to login", async ({ page, context }, testInfo) => {
+  const { calls, unexpected } = await mockServices(context, { login: { status: 200, body: confirmedSession() } });
+  await openForgotPassword(page);
+  await expect(page.getByRole("status")).toContainText("mã đặt lại mật khẩu đã được gửi");
+  await expect(page.locator(".auth-email")).toHaveText(EMAIL);
+  expect(calls.find((call) => call.path.endsWith("/recover"))?.body).toMatchObject({ email: EMAIL });
+  await page.screenshot({ path: testInfo.outputPath("reset-password.png"), fullPage: true });
+
+  await page.getByLabel("Mã xác nhận OTP").fill("999999");
+  await page.getByLabel("Mật khẩu mới", { exact: true }).fill(NEW_PASSWORD);
+  await page.getByLabel("Nhập lại mật khẩu mới", { exact: true }).fill(NEW_PASSWORD);
+  await page.getByRole("button", { name: "Đổi mật khẩu" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("không đúng hoặc đã hết hạn");
+  await expect(page.getByRole("heading", { name: "Đặt lại mật khẩu" })).toBeVisible();
+
+  await page.getByLabel("Mã xác nhận OTP").fill("000123");
+  await page.getByRole("button", { name: "Đổi mật khẩu" }).click();
+  await expect(page.getByRole("heading", { name: "Chào mừng trở lại" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Đã đổi mật khẩu");
+  await expect(page.getByRole("button", { name: "Đăng xuất" })).toHaveCount(0);
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue(EMAIL);
+  await expect(page.getByLabel("Mật khẩu", { exact: true })).toHaveValue("");
+
+  expect(calls.filter((call) => call.path.endsWith("/verify")).map((call) => call.body.type)).toEqual(["recovery", "recovery"]);
+  const update = calls.find((call) => call.path.endsWith("/user") && call.body.password);
+  expect(update?.body).toMatchObject({ password: NEW_PASSWORD });
+  const allStorage = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
+  expect(allStorage).not.toContain(NEW_PASSWORD);
+  expect(allStorage).not.toContain("000123");
+  expect(unexpected).toEqual([]);
+});
+
+test("mismatched new passwords are caught before the reset code is spent", async ({ page, context }) => {
+  const { calls, unexpected } = await mockServices(context);
+  await openForgotPassword(page);
+  await page.getByLabel("Mã xác nhận OTP").fill("000123");
+  await page.getByLabel("Mật khẩu mới", { exact: true }).fill(NEW_PASSWORD);
+  await page.getByLabel("Nhập lại mật khẩu mới", { exact: true }).fill(`${NEW_PASSWORD}x`);
+  await page.getByRole("button", { name: "Đổi mật khẩu" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("chưa khớp");
+  expect(calls.filter((call) => call.path.endsWith("/verify"))).toHaveLength(0);
+  expect(unexpected).toEqual([]);
+});
+
+test("a rejected new password can be retried without another code", async ({ page, context }) => {
+  const { calls, unexpected } = await mockServices(context, {
+    updateUser: [authError("same_password", 422), { status: 200, body: USER }],
+  });
+  await openForgotPassword(page);
+  await page.getByLabel("Mã xác nhận OTP").fill("000123");
+  await page.getByLabel("Mật khẩu mới", { exact: true }).fill(PASSWORD);
+  await page.getByLabel("Nhập lại mật khẩu mới", { exact: true }).fill(PASSWORD);
+  await page.getByRole("button", { name: "Đổi mật khẩu" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("khác mật khẩu cũ");
+  await expect(page.getByLabel("Mã xác nhận OTP")).toHaveCount(0);
+  await expect(page.getByText("Mã đã được chấp nhận")).toBeVisible();
+
+  await page.getByLabel("Mật khẩu mới", { exact: true }).fill(NEW_PASSWORD);
+  await page.getByLabel("Nhập lại mật khẩu mới", { exact: true }).fill(NEW_PASSWORD);
+  await page.getByRole("button", { name: "Đổi mật khẩu" }).click();
+  await expect(page.getByRole("status")).toContainText("Đã đổi mật khẩu");
+  expect(calls.filter((call) => call.path.endsWith("/verify"))).toHaveLength(1);
+  expect(unexpected).toEqual([]);
+});
+
+test("reset code resend waits for the cooldown and surfaces email errors", async ({ page, context }) => {
+  const { calls, unexpected } = await mockServices(context);
+  await page.clock.install();
+  await openForgotPassword(page);
+  await expect(page.getByRole("button", { name: /Gửi lại mã sau/ })).toBeDisabled();
+  await page.clock.fastForward(61_000);
+  await page.getByRole("button", { name: "Gửi lại mã", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("Đã yêu cầu gửi lại mã");
+  await expect(page.getByRole("button", { name: /Gửi lại mã sau/ })).toBeDisabled();
+  expect(calls.filter((call) => call.path.endsWith("/recover"))).toHaveLength(2);
+  await page.getByRole("button", { name: "Quay lại đăng nhập" }).click();
+  await expect(page.getByRole("heading", { name: "Chào mừng trở lại" })).toBeVisible();
+  expect(unexpected).toEqual([]);
+});
+
+test("SMTP failure when requesting a reset code stays on the email step", async ({ page, context }) => {
+  const { unexpected } = await mockServices(context, {
+    recover: { status: 500, body: { code: 500, error_code: "unexpected_failure", msg: "Error sending recovery email" } },
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Quên mật khẩu?" }).click();
+  await page.getByLabel("Email", { exact: true }).fill(EMAIL);
+  await page.getByRole("button", { name: "Gửi mã đặt lại mật khẩu" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("chưa có mã OTP nào được gửi");
+  await expect(page.getByRole("heading", { name: "Quên mật khẩu" })).toBeVisible();
   expect(unexpected).toEqual([]);
 });

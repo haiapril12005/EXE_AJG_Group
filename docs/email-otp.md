@@ -23,6 +23,16 @@ Khi Confirm email tắt, Supabase có thể cấp session ngay sau đăng ký; n
 
 Phần `{{ .Token }}` được Supabase thay bằng mã xác nhận thật. Giữ nguyên cú pháp này. Mẫu **Confirm sign up** áp dụng cho đăng ký bằng mật khẩu; mẫu **Magic Link** dành cho luồng đăng nhập không mật khẩu. [Email Templates](https://supabase.com/docs/guides/auth/auth-email-templates)
 
+## 2b. Đổi mẫu thư Reset Password (quên mật khẩu)
+
+Màn hình **Quên mật khẩu** gửi mã qua `resetPasswordForEmail`, rồi người dùng nhập mã cùng mật khẩu mới ngay trong ứng dụng. Mẫu mặc định của Supabase chỉ có link, không có mã, nên cần đổi:
+
+1. Trong **Authentication → Email → Templates**, chọn **Reset Password**.
+2. Đặt subject: `Mã đặt lại mật khẩu Job Ready`.
+3. Copy toàn bộ [supabase/templates/reset-password.html](../supabase/templates/reset-password.html) vào phần nội dung HTML rồi **Save**.
+
+Thư đặt lại mật khẩu dùng chung SMTP và hạn mức với thư xác nhận đăng ký ở mục 3. Supabase trả thành công cả khi email chưa có tài khoản để không lộ danh sách người dùng, nên ứng dụng chỉ báo "nếu email đã có tài khoản, mã đã được gửi".
+
 ## 3. Cấu hình SMTP để gửi tới email người dùng thử
 
 SMTP mặc định của Supabase chỉ gửi tới email của thành viên trong organization và hiện giới hạn **2 thư/giờ cho cả project**. Email người dùng ứng dụng không tự trở thành email được phép nhận. Vì vậy, email nhập đúng vẫn có thể bị từ chối gửi.
@@ -80,7 +90,16 @@ await createVerificationClient().auth.verifyOtp({ email, token, type: "email" })
 
 // Gửi lại thư xác nhận tài khoản đang chờ.
 await supabase.auth.resend({ email, type: "signup" });
+
+// Quên mật khẩu: gửi mã, xác nhận mã bằng client riêng, rồi đổi mật khẩu trên client đó.
+await createVerificationClient().auth.resetPasswordForEmail(email);
+const recovery = createVerificationClient();
+await recovery.auth.verifyOtp({ email, token, type: "recovery" });
+await recovery.auth.updateUser({ password: newPassword });
+await recovery.auth.signOut({ scope: "local" });
 ```
+
+Mật khẩu mới được kiểm tra độ dài và khớp hai lần nhập trước khi dùng mã. Nếu mã đúng nhưng Supabase từ chối mật khẩu (ví dụ `same_password`), người dùng nhập lại mật khẩu mà không cần mã mới. Mã và mật khẩu không được lưu vào storage; tải lại trang sẽ quay về đăng nhập.
 
 `resend` cũng trả thành công mà không gửi thư nếu email đã xác nhận hoặc chưa có tài khoản. `verifyOtp` dùng `type: "email"`; `resend` dùng `type: "signup"`. Tài khoản chưa xác nhận khi đăng nhập cần quay lại màn hình nhập OTP hoặc gửi lại mã, không tạo tài khoản mới hay bỏ qua xác nhận bằng admin API. [verifyOtp](https://supabase.com/docs/reference/javascript/auth-verifyotp), [resend](https://supabase.com/docs/reference/javascript/auth-resend)
 
@@ -99,6 +118,8 @@ await supabase.auth.resend({ email, type: "signup" });
 | Đăng ký email đã xác nhận | Supabase trả thành công giả (`identities` rỗng) và không gửi thư. Ứng dụng chuyển về đăng nhập; muốn thử OTP cần dùng email chưa đăng ký. |
 | `over_email_send_rate_limit` / HTTP 429 | Đợi hết hạn mức; kiểm tra Rate Limits và giới hạn nhà cung cấp SMTP. |
 | Thư vẫn chỉ có nút xác nhận | Kiểm tra đã lưu đúng mẫu **Confirm sign up** trong đúng project; yêu cầu thư mới. Bấm link trong mẫu mặc định sẽ xác nhận tài khoản mà không qua OTP. |
+| Thư quên mật khẩu chỉ có link, không có mã | Chưa đổi mẫu **Reset Password** theo mục 2b. |
+| `same_password` | Mật khẩu mới trùng mật khẩu cũ; nhập mật khẩu khác, không cần mã mới. |
 | `otp_expired` / mã không hợp lệ | Kiểm tra email đã nhập, dùng mã trong thư mới nhất hoặc yêu cầu gửi lại. |
 | Không thấy thư dù API không báo lỗi | Kiểm tra Spam/Junk, Auth Logs và nhật ký SMTP; API chấp nhận yêu cầu không bảo đảm thư đã tới hộp thư. |
 

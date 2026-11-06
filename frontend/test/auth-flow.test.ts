@@ -5,6 +5,7 @@ import {
   isEmailNotConfirmed,
   isEmailOtp,
   isExistingAccountSignup,
+  newPasswordProblem,
   normalizeEmail,
   OTP_RESEND_SECONDS,
   parsePendingVerification,
@@ -146,4 +147,16 @@ test("network errors and unknown provider errors have safe fallbacks", () => {
     assert.equal(getAuthErrorMessage(error), fallback);
   }
   assert.equal(fallback.includes("secret"), false);
+});
+
+test("a new password is checked for length and confirmation before the reset code is used", () => {
+  assert.match(newPasswordProblem("short", "short") ?? "", /ít nhất 8 ký tự/);
+  assert.match(newPasswordProblem("x".repeat(129), "x".repeat(129)) ?? "", /tối đa 128 ký tự/);
+  assert.match(newPasswordProblem("LongEnough!1", "LongEnough!2") ?? "", /chưa khớp/);
+  assert.equal(newPasswordProblem("LongEnough!1", "LongEnough!1"), null);
+  assert.equal(newPasswordProblem("12345678", "12345678"), null);
+});
+
+test("reusing the old password gets its own guidance", () => {
+  assert.match(getAuthErrorMessage({ code: "same_password", status: 422 }), /khác mật khẩu cũ/);
 });

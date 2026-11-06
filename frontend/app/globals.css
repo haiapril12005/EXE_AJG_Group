@@ -1226,3 +1226,5 @@ button:disabled {
     padding: 27px 22px;
   }
 }
+
+.auth-forgot { justify-content: flex-end; margin-top: -6px; }
