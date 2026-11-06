@@ -491,3 +491,55 @@ test("SMTP failure when requesting a reset code stays on the email step", async 
   await expect(page.getByRole("heading", { name: "Quên mật khẩu" })).toBeVisible();
   expect(unexpected).toEqual([]);
 });
+
+test("signup shows a password strength meter that lights up while typing", async ({ page, context }, testInfo) => {
+  const { unexpected } = await mockServices(context);
+  await page.goto("/");
+  await expect(page.locator(".auth-strength")).toHaveCount(0);
+  await page.getByRole("button", { name: "Đăng ký", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Tạo tài khoản" })).toBeVisible();
+
+  const password = page.getByLabel("Mật khẩu", { exact: true });
+  const meter = page.locator(".auth-strength");
+  await expect(password).toHaveAttribute("aria-describedby", "password-strength");
+  await expect(meter).toHaveAttribute("data-score", "0");
+  await expect(meter).toContainText("Chưa nhập");
+
+  await password.fill("abc");
+  await expect(meter).toHaveAttribute("data-score", "1");
+  await expect(meter.locator(".auth-strength-label strong")).toHaveText("Yếu");
+  await expect(meter.locator(".auth-strength-bar .is-lit")).toHaveCount(1);
+
+  await password.fill(PASSWORD);
+  await expect(meter).toHaveAttribute("data-score", "4");
+  await expect(meter.locator(".auth-strength-label strong")).toHaveText("Mạnh");
+  await expect(meter.locator(".auth-strength-bar .is-lit")).toHaveCount(4);
+  await expect(meter.locator(".auth-strength-checks .is-met")).toHaveCount(4);
+  await page.screenshot({ path: testInfo.outputPath("signup-strength.png"), fullPage: true });
+
+  await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
+  await expect(meter).toHaveCount(0);
+  expect(unexpected).toEqual([]);
+});
+
+test("the sign-in screen opens dark and the lamp cord or a field turns the light on", async ({ page, context }, testInfo) => {
+  const { unexpected } = await mockServices(context);
+  await page.goto("/");
+  const shell = page.locator("main.auth-led");
+  const cord = page.getByRole("button", { name: "Bật đèn" });
+  await expect(shell).not.toHaveClass(/is-lit/);
+  await expect(cord).toHaveAttribute("aria-pressed", "false");
+  await page.screenshot({ path: testInfo.outputPath("auth-dark.png"), fullPage: true });
+
+  await cord.click();
+  await expect(shell).toHaveClass(/is-lit/);
+  const offSwitch = page.getByRole("button", { name: "Tắt đèn" });
+  await expect(offSwitch).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: testInfo.outputPath("auth-lit.png"), fullPage: true });
+
+  await offSwitch.click();
+  await expect(shell).not.toHaveClass(/is-lit/);
+  await page.getByLabel("Email", { exact: true }).focus();
+  await expect(shell).toHaveClass(/is-lit/);
+  expect(unexpected).toEqual([]);
+});

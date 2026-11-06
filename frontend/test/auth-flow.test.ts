@@ -7,6 +7,7 @@ import {
   isExistingAccountSignup,
   newPasswordProblem,
   normalizeEmail,
+  passwordStrength,
   OTP_RESEND_SECONDS,
   parsePendingVerification,
   VERIFICATION_STORAGE_KEY,
@@ -159,4 +160,14 @@ test("a new password is checked for length and confirmation before the reset cod
 
 test("reusing the old password gets its own guidance", () => {
   assert.match(getAuthErrorMessage({ code: "same_password", status: 422 }), /khác mật khẩu cũ/);
+});
+
+test("password strength guides the user and keeps short passwords weak", () => {
+  assert.deepEqual([passwordStrength("").score, passwordStrength("").label], [0, "Chưa nhập"]);
+  assert.equal(passwordStrength("Ab1!").label, "Yếu");
+  assert.equal(passwordStrength("abcdefgh").label, "Yếu");
+  assert.equal(passwordStrength("abcdefg1").label, "Trung bình");
+  assert.equal(passwordStrength("Abcdefg1").label, "Khá");
+  assert.equal(passwordStrength("DemoPassword!2026").label, "Mạnh");
+  assert.deepEqual(passwordStrength("Abcdefg1").checks.map((check) => check.met), [true, true, true, false]);
 });

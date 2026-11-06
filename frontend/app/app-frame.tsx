@@ -115,8 +115,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
 
   const themeClass = theme === "dark" ? "theme-dark" : "";
   if (authLoading) return <main className={`app-shell loading-shell ${themeClass}`}><p>Đang kiểm tra phiên đăng nhập...</p></main>;
-  if (!session) return <AuthScreen onSession={setSession} theme={theme}
-    header={<><Brand /><ThemeToggle theme={theme} onToggle={toggleTheme} /></>} />;
+  if (!session) return <AuthScreen onSession={setSession} header={<Brand />} />;
 
   return (
     <AppContext.Provider value={{ session, token, profile, refreshProfile }}>
