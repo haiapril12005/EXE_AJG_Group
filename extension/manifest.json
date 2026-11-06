@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Job Ready - Gửi JD",
+  "version": "0.1.0",
+  "description": "Gửi mô tả công việc bạn đang xem sang Job Ready để phân tích với CV của bạn.",
+  "action": {
+    "default_title": "Gửi JD sang Job Ready",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://localhost:3000/*"]
+}
