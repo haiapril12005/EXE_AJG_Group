@@ -1,0 +1,547 @@
+/* Sign-in screen lit by an LED lamp. It opens dark; .is-lit (set by the pull cord or by focusing a field)
+   turns the light on. Everything is scoped to .auth-led so other pages keep their look. */
+
+/* Three classes so these colors win over `.app-shell.theme-dark` in globals.css. */
+.app-shell.theme-dark.auth-led {
+  --led: #34d399;
+  --led-rgb: 52, 211, 153;
+  --page: #06080b;
+  --surface: #0d1217;
+  --surface-soft: #111820;
+  --surface-muted: #080c10;
+  --ink: #e8eef3;
+  --heading: #f4f8fa;
+  --muted: #9aa6b2;
+  --subtle: #7c8894;
+  --line: #2b343e;
+  --green: var(--led);
+  --green-hover: #6ee7b7;
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--page);
+}
+
+.auth-led .auth-topbar {
+  position: relative;
+  z-index: 1;
+}
+
+.auth-led .auth-wrap {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 20px 48px;
+}
+
+/* On wide screens the lamp hangs from the top edge, beside the brand, so the form sits higher. */
+@media (min-width: 641px) {
+  .auth-led .auth-wrap { margin-top: -64px; }
+}
+
+.auth-led .auth-stage {
+  position: relative;
+  display: flex;
+  width: min(100%, 440px);
+  flex-direction: column;
+  align-items: center;
+}
+
+.auth-glow {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  width: 1500px;
+  height: 960px;
+  margin-left: -750px;
+  pointer-events: none;
+  background: radial-gradient(ellipse 58% 78% at 50% 0%, rgba(var(--led-rgb), .24) 0%, rgba(var(--led-rgb), .08) 45%, rgba(6, 8, 11, 0) 78%);
+  /* Fade the top edge in, so the light has no straight cut-off line beside the bulb. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 110px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 110px);
+  opacity: 0;
+  transition: opacity .6s ease;
+}
+
+.auth-lamp-group {
+  position: relative;
+  display: flex;
+  height: 160px;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 26px;
+  /* The cord hangs to the bulb's right; this offset keeps the bulb itself centred over the form. */
+  margin-left: 62px;
+  flex: none;
+}
+
+.auth-lamp {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.auth-lamp-cord {
+  width: 2px;
+  height: 72px;
+  background: #2a323b;
+}
+
+.auth-lamp-cap {
+  width: 30px;
+  height: 22px;
+  border: 1px solid #343d47;
+  border-radius: 6px 6px 4px 4px;
+  background: #232a32;
+}
+
+.auth-lamp-bulb {
+  width: 64px;
+  height: 64px;
+  margin-top: -4px;
+  border: 1px solid #2c353f;
+  border-radius: 50% 50% 46% 46%;
+  background: #151b21;
+  box-shadow: inset 0 -6px 14px rgba(0, 0, 0, .45);
+  transition: background .4s ease, border-color .4s ease, box-shadow .5s ease;
+}
+
+.auth-pull {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform-origin: top center;
+  animation: auth-cord-sway 3.2s ease-in-out infinite;
+}
+
+.auth-pull-line {
+  width: 1px;
+  height: 64px;
+  background: #4a5561;
+}
+
+.auth-pull-knob {
+  display: flex;
+  width: 36px;
+  height: 48px;
+  flex-direction: column;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* A small slim gourd: a little top lobe, a narrow waist, a rounder body. The button around it stays
+   big enough to tap. */
+.auth-pull-knob span {
+  position: relative;
+  width: 12px;
+  height: 18px;
+  margin-top: 7px;
+  border-radius: 50% 50% 46% 46% / 60% 60% 40% 40%;
+  background: radial-gradient(circle at 35% 35%, #6b7783 0%, #4a5561 55%, #39424c 100%);
+  transition: filter .3s ease;
+}
+
+.auth-pull-knob span::before {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  width: 8px;
+  height: 9px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: inherit;
+  content: "";
+}
+
+.auth-pull-knob:hover span { filter: brightness(1.3); }
+.auth-pull-knob:focus-visible { outline: 2px solid var(--led); outline-offset: 2px; }
+
+/* A tug: the cord stretches down, then springs back. */
+.auth-pull.is-pulled { animation: auth-cord-tug .45s ease-out 1; }
+
+.auth-led .auth-card {
+  position: relative;
+  width: min(100%, 440px);
+  padding: 30px 34px;
+  border: 1px solid #1c232b;
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+  transition: border-color .6s ease, box-shadow .6s ease;
+}
+
+.auth-led-strip {
+  position: absolute;
+  top: -1px;
+  right: 24px;
+  left: 24px;
+  display: flex;
+  height: 4px;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.auth-led-strip span {
+  width: 6px;
+  height: 4px;
+  border-radius: 2px;
+  background: #26303a;
+  transition: background .4s ease, box-shadow .4s ease;
+}
+
+.auth-led .form-input {
+  min-height: 48px;
+  border-color: var(--line);
+  background: var(--surface-muted);
+}
+
+.auth-led .form-input:focus {
+  border-color: var(--led);
+  box-shadow: 0 0 0 3px rgba(var(--led-rgb), .18);
+}
+
+.auth-led .primary-button,
+.auth-led .secondary-button {
+  border-radius: 12px;
+}
+
+.auth-led .primary-button {
+  background: #1b2229;
+  box-shadow: none;
+  color: #c3ccd5;
+}
+
+.auth-led .primary-button:hover:not(:disabled) {
+  background: #232c35;
+  box-shadow: none;
+}
+
+.auth-led:not(.is-lit) .eyebrow { color: var(--muted); }
+
+/* Lights on. */
+.auth-led.is-lit .auth-glow {
+  opacity: 1;
+  animation: auth-light-on .9s ease-out 1;
+}
+
+.auth-led.is-lit .auth-lamp-bulb {
+  border-color: rgba(var(--led-rgb), .9);
+  background: var(--led);
+  box-shadow: 0 0 30px rgba(var(--led-rgb), .85), 0 0 90px rgba(var(--led-rgb), .45), 0 0 180px rgba(var(--led-rgb), .25);
+  animation: auth-light-on .9s ease-out 1;
+}
+
+.auth-led.is-lit .auth-pull-line { height: 78px; }
+
+.auth-led.is-lit .auth-pull-knob span {
+  background: radial-gradient(circle at 35% 35%, #a7f3d0 0%, var(--led) 55%, #10b981 100%);
+  filter: drop-shadow(0 0 6px rgba(var(--led-rgb), .9));
+}
+
+.auth-led.is-lit .auth-card {
+  border-color: rgba(var(--led-rgb), .55);
+  box-shadow: 0 0 0 1px rgba(var(--led-rgb), .3), 0 0 48px rgba(var(--led-rgb), .28), 0 0 120px rgba(var(--led-rgb), .16), 0 24px 60px rgba(0, 0, 0, .55);
+}
+
+.auth-led.is-lit .auth-led-strip span {
+  background: var(--led);
+  box-shadow: 0 0 8px rgba(var(--led-rgb), .9);
+  animation: auth-led-chase 1.6s ease-in-out infinite;
+}
+
+/* Dark text on the bright LED green keeps the label readable. */
+.auth-led.is-lit .primary-button {
+  background: var(--led);
+  box-shadow: 0 0 24px rgba(var(--led-rgb), .45);
+  color: #04140e;
+}
+
+.auth-led.is-lit .primary-button:hover:not(:disabled) {
+  background: var(--green-hover);
+  box-shadow: 0 0 30px rgba(var(--led-rgb), .55);
+}
+
+.auth-led .secondary-button {
+  border-color: #3a444e;
+  background: transparent;
+}
+
+.auth-led .notice-info {
+  background: var(--surface-muted);
+}
+
+.auth-led .auth-error {
+  border-color: #5c2a2f;
+  background: #2a1416;
+  color: #ffc9cc;
+}
+
+.auth-strength {
+  --strength: #8d99a5;
+  display: grid;
+  gap: 10px;
+  margin-top: -4px;
+}
+
+.auth-strength[data-score="1"] { --strength: #fb923c; }
+.auth-strength[data-score="2"] { --strength: #fbbf24; }
+.auth-strength[data-score="3"] { --strength: #38bdf8; }
+.auth-strength[data-score="4"] { --strength: var(--led); }
+
+.auth-strength-bar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.auth-strength-bar span {
+  height: 6px;
+  border-radius: 3px;
+  background: #1f272f;
+  transition: background .3s ease, box-shadow .3s ease;
+}
+
+.auth-strength-bar span.is-lit {
+  background: var(--strength);
+  box-shadow: 0 0 8px var(--strength);
+}
+
+.auth-strength-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.auth-strength-label strong {
+  color: var(--strength);
+  font-weight: 800;
+}
+
+.auth-strength-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  list-style: none;
+}
+
+.auth-strength-checks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+.auth-strength-checks li::before {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2b343e;
+  content: "";
+  transition: background .3s ease, box-shadow .3s ease;
+}
+
+.auth-strength-checks li.is-met {
+  color: var(--ink);
+}
+
+.auth-strength-checks li.is-met::before {
+  background: var(--led);
+  box-shadow: 0 0 6px var(--led);
+}
+
+.auth-led .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
+}
+
+/* The lamp flickers as it comes on. */
+@keyframes auth-light-on {
+  0% { opacity: 0; }
+  8% { opacity: .8; }
+  12% { opacity: .2; }
+  20%, 100% { opacity: 1; }
+}
+
+@keyframes auth-cord-sway {
+  0%, 100% { transform: rotate(-2deg); }
+  50% { transform: rotate(2deg); }
+}
+
+@keyframes auth-cord-tug {
+  0% { transform: translateY(0); }
+  35% { transform: translateY(18px); }
+  70% { transform: translateY(-4px); }
+  100% { transform: translateY(0); }
+}
+
+@keyframes auth-led-chase {
+  0%, 100% { opacity: .35; }
+  50% { opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  .auth-lamp-group { height: 128px; }
+  .auth-lamp-cord { height: 40px; }
+  .auth-pull-line { height: 40px; }
+  .auth-led.is-lit .auth-pull-line { height: 52px; }
+  .auth-glow { top: 44px; }
+  .auth-led .auth-card { padding: 27px 22px; }
+}
+
+@media (max-width: 420px) {
+  .auth-strength-checks { grid-template-columns: 1fr; }
+}
+
+/* Shorter screens (most laptops): the lamp and spacing shrink so the sign-in form fits without scrolling. */
+@media (max-height: 900px) {
+  .auth-led .auth-topbar { padding: 12px 0; }
+  .auth-lamp-group { height: 118px; }
+  .auth-lamp-cord { height: 42px; }
+  .auth-lamp-cap { width: 26px; height: 18px; }
+  .auth-lamp-bulb { width: 54px; height: 54px; }
+  .auth-pull-line { height: 46px; }
+  .auth-led.is-lit .auth-pull-line { height: 56px; }
+  .auth-glow { top: 44px; }
+  .auth-led .auth-wrap { padding-bottom: 24px; }
+  .auth-led .auth-card { padding: 24px 30px; }
+  .auth-led .auth-card .eyebrow { margin-bottom: 6px; }
+  .auth-led .muted-copy { margin: 6px 0 16px; }
+  .auth-led .form-stack { gap: 12px; }
+  .auth-led .form-input { min-height: 44px; }
+  .auth-led .auth-switch { margin-top: 12px; }
+  .auth-strength { gap: 6px; margin-top: -6px; }
+  .auth-strength-checks { gap: 4px 12px; }
+}
+
+@media (max-height: 900px) and (min-width: 641px) {
+  .auth-led .auth-wrap { margin-top: -52px; }
+}
+
+@media (max-height: 760px) {
+  .auth-led .auth-topbar { padding: 8px 0; }
+  .auth-lamp-group { height: 92px; }
+  .auth-lamp-cord { height: 26px; }
+  .auth-lamp-bulb { width: 46px; height: 46px; }
+  .auth-pull-line { height: 30px; }
+  .auth-led.is-lit .auth-pull-line { height: 38px; }
+  .auth-glow { top: 30px; }
+  .auth-led .auth-wrap { padding-bottom: 16px; }
+  .auth-led .auth-card { padding: 20px 26px; }
+  .auth-led .auth-card h1 { font-size: 24px; }
+  .auth-led .muted-copy { margin: 4px 0 12px; line-height: 1.5; }
+  .auth-led .form-stack { gap: 10px; }
+  .auth-led .field-label { gap: 5px; }
+  .auth-led .form-input { min-height: 40px; }
+  .auth-led .primary-button { min-height: 42px; }
+  .auth-led .auth-switch { margin-top: 10px; }
+}
+
+@media (max-height: 680px) {
+  .auth-lamp-group { height: 74px; }
+  .auth-lamp-cord { height: 14px; }
+  .auth-lamp-cap { width: 22px; height: 14px; }
+  .auth-lamp-bulb { width: 40px; height: 40px; }
+  .auth-pull-line { height: 18px; }
+  .auth-led.is-lit .auth-pull-line { height: 24px; }
+  .auth-glow { top: 20px; }
+  .auth-led .auth-card { padding: 16px 24px; }
+  .auth-led .auth-card .eyebrow { margin-bottom: 2px; }
+  .auth-led .auth-card h1 { font-size: 22px; }
+  .auth-led .muted-copy { margin: 2px 0 10px; font-size: 12px; }
+  .auth-led .form-stack { gap: 8px; }
+  .auth-led .form-input { min-height: 38px; padding-top: 7px; padding-bottom: 7px; }
+  .auth-led .primary-button { min-height: 40px; }
+  .auth-led .auth-switch { margin-top: 8px; }
+}
+
+@media (max-height: 760px) and (min-width: 641px) {
+  .auth-led .auth-wrap { margin-top: -44px; }
+}
+
+/* Wide screens: the lamp hangs from the ceiling beside the form's left edge and shines across it,
+   so it takes no height above the form and the form sits in the middle of the screen. */
+@media (min-width: 861px) {
+  .app-shell.theme-dark.auth-led {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .auth-led .auth-wrap {
+    flex: 1;
+    justify-content: center;
+    margin-top: 0;
+  }
+
+  /* Anchored by its bottom edge: the bulb sits level with the top of the form, the cords run up off-screen. */
+  .auth-led .auth-lamp-group {
+    position: absolute;
+    right: calc(100% + 30px);
+    bottom: calc(100% - 104px);
+    height: auto;
+    margin: 0;
+    flex-direction: row-reverse;
+    align-items: flex-end;
+    gap: 22px;
+  }
+
+  .auth-led .auth-lamp-cord { height: 100vh; }
+
+  .auth-led .auth-pull {
+    margin-bottom: -50px;
+    animation: auth-cord-sway-long 3.2s ease-in-out infinite;
+  }
+
+  .auth-led .auth-pull.is-pulled { animation: auth-cord-tug .45s ease-out 1; }
+
+  .auth-led .auth-pull-line,
+  .auth-led.is-lit .auth-pull-line { height: 100vh; }
+
+  /* Light spreads from the bulb (left of the form, near its top) down and to the right, across the form. */
+  .auth-led .auth-glow {
+    top: -728px;
+    left: -862px;
+    width: 1600px;
+    height: 1600px;
+    margin-left: 0;
+    background: radial-gradient(circle closest-side, rgba(var(--led-rgb), .26) 0%, rgba(var(--led-rgb), .1) 40%, rgba(6, 8, 11, 0) 100%);
+    -webkit-mask-image: linear-gradient(118deg, transparent 30%, rgba(0, 0, 0, .35) 46%, #000 62%);
+    mask-image: linear-gradient(118deg, transparent 30%, rgba(0, 0, 0, .35) 46%, #000 62%);
+  }
+}
+
+/* A long cord swings only a little at the knob. */
+@keyframes auth-cord-sway-long {
+  0%, 100% { transform: rotate(-.25deg); }
+  50% { transform: rotate(.25deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-led .auth-glow,
+  .auth-led .auth-lamp-bulb,
+  .auth-led .auth-pull,
+  .auth-led .auth-pull.is-pulled,
+  .auth-led .auth-led-strip span { animation: none; }
+}

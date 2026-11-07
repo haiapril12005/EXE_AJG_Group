@@ -34,6 +34,30 @@ export function newPasswordProblem(password: string, confirmation: string): stri
   return null;
 }
 
+export type PasswordStrength = {
+  /** 0 = nothing typed, 1 = weak … 4 = strong. */
+  score: 0 | 1 | 2 | 3 | 4;
+  label: string;
+  checks: { label: string; met: boolean }[];
+};
+
+const STRENGTH_LABELS = ["Chưa nhập", "Yếu", "Trung bình", "Khá", "Mạnh"] as const;
+
+/** A guide for the user while typing; the only hard rule is still PASSWORD_MIN_LENGTH. */
+export function passwordStrength(password: string): PasswordStrength {
+  const checks = [
+    { label: `Ít nhất ${PASSWORD_MIN_LENGTH} ký tự`, met: password.length >= PASSWORD_MIN_LENGTH },
+    { label: "Chữ hoa và chữ thường", met: /[a-z]/.test(password) && /[A-Z]/.test(password) },
+    { label: "Có chữ số", met: /\d/.test(password) },
+    { label: "Có ký tự đặc biệt", met: /[^A-Za-z0-9]/.test(password) }
+  ];
+  const met = checks.filter((check) => check.met).length;
+  // A short password stays weak however varied it is.
+  const score = (password.length === 0 ? 0
+    : password.length < PASSWORD_MIN_LENGTH ? 1 : Math.max(1, met)) as PasswordStrength["score"];
+  return { score, label: STRENGTH_LABELS[score], checks };
+}
+
 export function isEmailNotConfirmed(error: unknown): boolean {
   return asRecord(error)?.code === "email_not_confirmed";
 }
