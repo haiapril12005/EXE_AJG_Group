@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { Mascot } from "page-mascot";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { api } from "../utils/api";
 import { createClient } from "../utils/supabase/client";
@@ -12,10 +13,13 @@ const supabase = createClient();
 
 export type Profile = {
   id: string;
+  user_code?: string;
   email: string;
   full_name: string;
+  phone?: string;
   credits: number;
   is_admin?: boolean;
+  created_at?: string;
   payments_enabled: boolean;
 };
 
@@ -24,6 +28,7 @@ type AppState = {
   token: string;
   profile: Profile | null;
   refreshProfile: () => Promise<void>;
+  signOut: () => Promise<void>;
 };
 
 const AppContext = createContext<AppState | null>(null);
@@ -32,6 +37,14 @@ export function useApp(): AppState {
   const state = useContext(AppContext);
   if (!state) throw new Error("useApp must be used inside AppFrame");
   return state;
+}
+
+export function formatUserCode(id: string): string {
+  const clean = id.replace(/[^0-9a-fA-F]/g, "").padEnd(32, "0");
+  const head = Number.parseInt(clean.slice(0, 7), 16) || 0;
+  const tail = Number.parseInt(clean.slice(25, 32), 16) || 0;
+  const seed = head ^ tail;
+  return String(10_000_000 + (seed % 90_000_000));
 }
 
 const NAV_ITEMS = [
@@ -67,9 +80,33 @@ export function AppFrame({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
   const token = session?.access_token ?? "";
   const userId = session?.user.id;
+
+  useEffect(() => {
+    setAccountOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!accountOpen) return;
+    function onPointerDown(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setAccountOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setAccountOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [accountOpen]);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("cv-fit-theme");
@@ -133,6 +170,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
+    setAccountOpen(false);
     const { error } = await supabase.auth.signOut();
     if (error) setNotice(`Không thể đăng xuất: ${error.message}`);
   }
@@ -141,8 +179,12 @@ export function AppFrame({ children }: { children: ReactNode }) {
   if (authLoading) return <main className={`app-shell loading-shell ${themeClass}`}><p>Đang kiểm tra phiên đăng nhập...</p></main>;
   if (!session) return <AuthScreen onSession={signedIn} header={<Brand />} />;
 
+  const displayName = profile?.full_name || (session.user.user_metadata?.full_name as string | undefined) || session.user.email || "Người dùng";
+  const displayId = profile?.id || session.user.id;
+  const userCode = profile?.user_code || formatUserCode(displayId);
+
   return (
-    <AppContext.Provider value={{ session, token, profile, refreshProfile }}>
+    <AppContext.Provider value={{ session, token, profile, refreshProfile, signOut }}>
       <main className={`app-shell ${themeClass}`}>
         <header className="site-header no-print">
           <div className="header-inner">
@@ -156,18 +198,77 @@ export function AppFrame({ children }: { children: ReactNode }) {
             <div className="header-actions">
               <ThemeToggle theme={theme} onToggle={toggleTheme} />
               <span className="header-divider" />
-              <div className="profile-chip">
-                <span className="avatar">{(profile?.full_name || session.user.email || "U").trim().charAt(0).toUpperCase()}</span>
-                <span className="profile-name">{profile?.full_name || session.user.email}</span>
-                {profile?.is_admin && <Link href="/admin" className="admin-role-pill">ADMIN</Link>}
-              </div>
               {profile?.payments_enabled && <span className="credits-chip">Credits <strong>{profile.credits}</strong></span>}
-              <button className="text-button" onClick={() => void signOut()}>Đăng xuất</button>
+              <div className="account-menu-wrap" ref={menuRef}>
+                <button
+                  type="button"
+                  className="profile-chip account-trigger"
+                  aria-label="Menu tài khoản"
+                  aria-expanded={accountOpen}
+                  aria-haspopup="menu"
+                  onClick={() => setAccountOpen((open) => !open)}
+                >
+                  <span className="avatar">{displayName.trim().charAt(0).toUpperCase()}</span>
+                  <span className="profile-meta">
+                    <span className="profile-name-line">
+                      <span className="profile-name">{displayName}</span>
+                      {profile?.is_admin && <span className="admin-role-pill">ADMIN</span>}
+                    </span>
+                    <small className="profile-uid">ID: {userCode}</small>
+                  </span>
+                  <span className="account-caret" aria-hidden="true">▾</span>
+                </button>
+
+                {accountOpen && (
+                  <div className="account-dropdown" role="menu" aria-label="Tùy chọn tài khoản">
+                    <div className="account-dropdown-head">
+                      <div className="account-dropdown-title">
+                        <strong>{displayName}</strong>
+                        {profile?.is_admin && <span className="admin-role-pill">ADMIN</span>}
+                      </div>
+                      <small className="account-dropdown-uid">ID: {userCode}</small>
+                      <small className="account-dropdown-sub">
+                        {profile?.email || session.user.email}
+                        {profile?.phone ? ` · ${profile.phone}` : ""}
+                      </small>
+                    </div>
+
+                    <div className="account-dropdown-links" onClick={() => setAccountOpen(false)}>
+                      <Link href="/profile" role="menuitem" className="account-menu-item">
+                        <strong>Hồ sơ cá nhân</strong>
+                      </Link>
+                      <Link href="/jobs?saved=1" role="menuitem" className="account-menu-item">
+                        <strong>Việc làm xem sau</strong>
+                      </Link>
+                      <Link href="/history" role="menuitem" className="account-menu-item">
+                        <strong>Lịch sử hoạt động</strong>
+                      </Link>
+                      {profile?.is_admin && (
+                        <Link href="/admin" role="menuitem" className="account-menu-item">
+                          <strong>Thống kê</strong>
+                        </Link>
+                      )}
+                    </div>
+
+                    <div className="account-dropdown-footer">
+                      <button type="button" role="menuitem" className="account-logout-btn" onClick={() => void signOut()}>
+                        Đăng xuất
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </header>
 
         <div className={`page-content ${WIDE_ROUTES.test(pathname) ? "page-wide" : ""}`}>
+          <div className="page-mascot-bar no-print">
+            <Mascot
+              directions="/mascots/frog-directions.webp"
+              reactions="/mascots/frog-reactions.webp"
+            />
+          </div>
           {notice && <p role="status" className="notice notice-info no-print">{notice}</p>}
           {children}
           <footer className="site-footer no-print"><span>Job Ready · Phân tích có trách nhiệm, không bịa đặt thông tin hồ sơ.</span><span>{profile ? (profile.payments_enabled ? `Còn lại ${profile.credits} credits` : "Dùng thử miễn phí") : ""}</span></footer>

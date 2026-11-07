@@ -95,6 +95,7 @@ type Options = { jobsStatus?: number; savedCvs?: boolean; structured?: boolean; 
 async function mockServices(context: BrowserContext, { jobsStatus = 200, savedCvs = true, structured = true, interview = INTERVIEW, isAdmin = false }: Options = {}) {
   const posts: { method: string; path: string; body: Record<string, unknown> }[] = [];
   const unexpected: string[] = [];
+  let savedJobIds: string[] = [];
   await context.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -110,7 +111,28 @@ async function mockServices(context: BrowserContext, { jobsStatus = 200, savedCv
       const method = request.method();
       if (method !== "GET") posts.push({ method, path, body: request.postDataJSON() ?? {} });
       const page = url.searchParams.get("page") ?? "1";
-      if (path === "/user/me") return reply(route, 200, { user: { id: USER_ID, email: EMAIL, full_name: "Flow Demo", credits: 0, is_admin: isAdmin, payments_enabled: false } });
+      if (path === "/user/me") {
+        if (method === "PUT") {
+          const body = request.postDataJSON() ?? {};
+          return reply(route, 200, {
+            user: {
+              id: USER_ID,
+              email: typeof body.email === "string" ? body.email : EMAIL,
+              full_name: typeof body.full_name === "string" ? body.full_name : "Flow Demo",
+              phone: typeof body.phone === "string" ? body.phone : "0912345678",
+              credits: 0,
+              is_admin: isAdmin,
+              payments_enabled: false,
+            },
+          });
+        }
+        return reply(route, 200, {
+          user: { id: USER_ID, email: EMAIL, full_name: "Flow Demo", phone: "0912345678", credits: 0, is_admin: isAdmin, payments_enabled: false },
+        });
+      }
+      if (path === "/user/password" && method === "PUT") {
+        return reply(route, 200, { updated: true });
+      }
       if (path === "/admin/overview") {
         if (!isAdmin) return reply(route, 403, { error: "Chỉ tài khoản quản trị (Admin) mới có quyền truy cập trang thống kê này." });
         return reply(route, 200, {
@@ -156,9 +178,22 @@ async function mockServices(context: BrowserContext, { jobsStatus = 200, savedCv
       if (path === "/analyze") return reply(route, 200, ANALYSIS);
       if (path === "/ai/rewrite-section") return reply(route, 200, { new_description: `- Rewritten by AI ${posts.length}` });
       if (path === "/jobs") {
-        return jobsStatus === 200
-          ? reply(route, 200, { jobs: [JOB], total: 1, page: 1, page_size: 20 })
-          : reply(route, jobsStatus, { error: "Kho việc làm chưa sẵn sàng. Hãy chạy migration 004_job_postings.sql rồi chạy npm run jobs:sync." });
+        if (jobsStatus !== 200) {
+          return reply(route, jobsStatus, { error: "Kho việc làm chưa sẵn sàng. Hãy chạy migration 004_job_postings.sql rồi chạy npm run jobs:sync." });
+        }
+        const onlySaved = url.searchParams.get("saved") === "1";
+        const jobs = onlySaved ? [JOB].filter((j) => savedJobIds.includes(j.id)) : [JOB];
+        return reply(route, 200, { jobs, total: jobs.length, page: 1, page_size: 20, saved_ids: savedJobIds });
+      }
+      if (path === `/jobs/${JOB_ID}/save`) {
+        if (method === "POST") {
+          savedJobIds = [JOB_ID, ...savedJobIds.filter((id) => id !== JOB_ID)];
+          return reply(route, 200, { saved: true, saved_ids: savedJobIds });
+        }
+        if (method === "DELETE") {
+          savedJobIds = savedJobIds.filter((id) => id !== JOB_ID);
+          return reply(route, 200, { saved: false, saved_ids: savedJobIds });
+        }
       }
       if (path === `/jobs/${JOB_ID}`) return reply(route, 200, { job: { ...JOB, description: `${JD} Join the Grab platform team.` } });
       if (path === "/interviews" && method === "GET") {
@@ -186,7 +221,7 @@ async function signIn(page: Page) {
   await page.getByLabel("Email", { exact: true }).fill(EMAIL);
   await page.getByLabel("Mật khẩu", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Đăng xuất" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Menu tài khoản" })).toBeVisible();
   // Signing in opens the job list; these tests start from the analysis page.
   await expect(page).toHaveURL(/\/jobs$/);
   await page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Phân tích" }).click();
@@ -329,7 +364,7 @@ test("the chosen theme survives a reload", async ({ page, context }) => {
   await page.getByRole("button", { name: "Bật giao diện tối" }).click();
   await expect(page.locator("main.app-shell")).toHaveClass(/theme-dark/);
   await page.reload();
-  await expect(page.getByRole("button", { name: "Đăng xuất" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Menu tài khoản" })).toBeVisible();
   await expect(page.locator("main.app-shell")).toHaveClass(/theme-dark/);
 });
 
@@ -398,13 +433,13 @@ test("history lists CVs, reports and interview sessions", async ({ page, context
   expect(unexpected).toEqual([]);
 });
 
-for (const path of ["/", "/jobs", "/history", "/create", `/analysis/${ANALYSIS_ID}`, `/interview/${INTERVIEW_ID}`]) {
+for (const path of ["/", "/jobs", "/history", "/create", "/profile", `/analysis/${ANALYSIS_ID}`, `/interview/${INTERVIEW_ID}`]) {
   test(`${path} fits a phone screen`, async ({ page, context }) => {
     await mockServices(context);
     await signIn(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(path);
-    await expect(page.getByRole("button", { name: "Đăng xuất" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Menu tài khoản" })).toBeVisible();
     await expect(page.locator(".site-footer")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
@@ -535,4 +570,69 @@ test("admin overview is hidden from regular users and visible to verified admins
   await expect(page.getByRole("heading", { name: "Thống kê tổng quan hệ thống" })).toBeVisible();
   await expect(page.getByText("87.000đ")).toBeVisible();
   await expect(page.getByText("Quản trị viên (1/3)")).toBeVisible();
+});
+
+test("account menu displays User ID under the name, opens profile to edit info & password, and places sign-out at the bottom", async ({ page, context }) => {
+  const { posts, unexpected } = await mockServices(context);
+  await signIn(page);
+
+  const accountTrigger = page.getByRole("button", { name: "Menu tài khoản" });
+  await expect(accountTrigger).toContainText("Flow Demo");
+  await expect(accountTrigger.locator(".profile-uid")).toHaveText(/^ID: \d{8}$/);
+
+  await accountTrigger.click();
+  const dropdown = page.getByRole("menu", { name: "Tùy chọn tài khoản" });
+  await expect(dropdown).toBeVisible();
+  await expect(dropdown.locator(".account-dropdown-uid")).toHaveText(/^ID: \d{8}$/);
+  await expect(dropdown.getByRole("menuitem", { name: "Đăng xuất" })).toBeVisible();
+
+  await dropdown.getByRole("menuitem", { name: "Hồ sơ cá nhân" }).click();
+  await expect(page).toHaveURL(/\/profile$/);
+  await expect(page.locator(".profile-id-code")).toHaveText(/^\d{8}$/);
+
+  await page.getByLabel("Họ và tên").fill("Phạm Hải");
+  await page.getByLabel("Số điện thoại").fill("0987654321");
+  await page.getByLabel("Địa chỉ Email").fill("new@example.com");
+  await page.getByRole("button", { name: "Lưu thông tin cá nhân" }).click();
+  await expect(page.getByRole("status")).toContainText("Đã cập nhật thông tin hồ sơ thành công");
+  expect(posts.find((p) => p.path === "/user/me" && p.method === "PUT")?.body).toEqual({
+    full_name: "Phạm Hải",
+    phone: "0987654321",
+    email: "new@example.com",
+  });
+
+  await page.getByLabel("Mật khẩu hiện tại", { exact: true }).fill(PASSWORD);
+  await page.getByLabel("Mật khẩu mới", { exact: true }).fill("NewStrongPass!2026");
+  await page.getByLabel("Nhập lại mật khẩu mới", { exact: true }).fill("NewStrongPass!2026");
+  await page.getByRole("button", { name: "Cập nhật mật khẩu" }).click();
+  await expect(page.getByRole("status")).toContainText("Đã đổi mật khẩu thành công");
+  expect(posts.find((p) => p.path === "/user/password" && p.method === "PUT")?.body).toEqual({
+    current_password: PASSWORD,
+    new_password: "NewStrongPass!2026",
+  });
+
+  await expect(page.getByRole("button", { name: "Đăng xuất khỏi thiết bị này" })).toBeVisible();
+  expect(unexpected).toEqual([]);
+});
+
+test("a job saved for later stays in the user's saved list across reloads and re-logins", async ({ page, context }) => {
+  const { unexpected } = await mockServices(context);
+  await signIn(page);
+  await page.getByRole("link", { name: "Việc làm", exact: true }).click();
+
+  const saveBtn = page.getByRole("button", { name: "☆ Lưu xem sau" });
+  await expect(saveBtn).toBeVisible();
+  await saveBtn.click();
+  await expect(page.getByRole("button", { name: "★ Đã lưu" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Xem sau · Đã lưu \(1\)/ })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "★ Đã lưu" })).toBeVisible();
+  await page.getByRole("tab", { name: /Xem sau · Đã lưu \(1\)/ }).click();
+  await expect(page.getByText("1 việc làm đã lưu để xem sau")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Backend Engineer" })).toBeVisible();
+
+  await page.getByRole("button", { name: "★ Đã lưu" }).click();
+  await expect(page.getByText("0 việc làm đã lưu để xem sau")).toBeVisible();
+  expect(unexpected).toEqual([]);
 });

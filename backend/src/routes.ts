@@ -1,7 +1,7 @@
 import { Router, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
-import { fetchAdminOverview, isMissingAdminColumn, MIGRATION_007 } from "./admin";
+import { deriveUserCode, fetchAdminOverview, isMissingAdminColumn, MIGRATION_007 } from "./admin";
 import { analyzeCVvsJD, evaluateInterviewAnswer, generateCvQualityFeedback, generateMockQuestions, rewriteSection, rewriteSectionSchema, structureCV } from "./aiService";
 import { cvDataSchema, cvDataToText, emptyCvData, extractContacts, extractLinks, maskText, stripNul, type CvData } from "./cvData";
 import { inspectCvQuality, scoreQualityIssues } from "./cvQuality";
@@ -115,16 +115,153 @@ router.post("/auth/login", async (req, res) => {
   }
 });
 
+function isMissingUserColumn(error: { message?: string } | null): boolean {
+  return Boolean(error?.message && /is_admin|phone|user_code/i.test(error.message));
+}
+
+async function loadUserProfile(id: string) {
+  type UserRow = {
+    id: string;
+    user_code?: string | null;
+    email: string;
+    full_name: string;
+    phone?: string;
+    credits: number;
+    is_admin?: boolean;
+    created_at?: string;
+  };
+  let result = await supabase.from("users").select("id,user_code,email,full_name,phone,credits,is_admin,created_at").eq("id", id).single();
+  if (isMissingUserColumn(result.error)) {
+    const withAdmin = await supabase.from("users").select("id,email,full_name,credits,is_admin,created_at").eq("id", id).single();
+    if (!isMissingUserColumn(withAdmin.error)) {
+      result = { ...withAdmin, data: withAdmin.data ? { ...withAdmin.data, phone: "", user_code: null } : null } as typeof result;
+    } else {
+      const base = await supabase.from("users").select("id,email,full_name,credits,created_at").eq("id", id).single();
+      result = { ...base, data: base.data ? { ...base.data, phone: "", is_admin: false, user_code: null } : null } as typeof result;
+    }
+  }
+  if (result.error || !result.data) throw result.error ?? new HttpError(404, "User not found");
+  const row = result.data as UserRow;
+  let phone = row.phone ?? "";
+  let userCode = row.user_code && /^[0-9]{7,8}$/.test(row.user_code) ? row.user_code : "";
+  if (!phone || !userCode) {
+    const authUser = await supabase.auth.admin.getUserById(id).catch(() => null);
+    const metaPhone = authUser?.data?.user?.user_metadata?.phone;
+    const metaCode = authUser?.data?.user?.user_metadata?.user_code;
+    if (!phone && typeof metaPhone === "string") phone = metaPhone;
+    if (!userCode && typeof metaCode === "string" && /^[0-9]{7,8}$/.test(metaCode)) userCode = metaCode;
+  }
+  if (!userCode) {
+    userCode = deriveUserCode(row.id);
+    void supabase.from("users").update({ user_code: userCode }).eq("id", row.id);
+  }
+  return {
+    id: row.id,
+    user_code: userCode,
+    email: row.email,
+    full_name: row.full_name,
+    phone,
+    credits: row.credits,
+    is_admin: Boolean(row.is_admin),
+    created_at: row.created_at,
+    payments_enabled: paymentsEnabled
+  };
+}
+
+const updateProfileSchema = z.object({
+  full_name: z.string().trim().min(1, "Vui lòng nhập họ và tên").max(120),
+  phone: z.string().trim().max(30).optional().default(""),
+  email: z.string().trim().toLowerCase().email("Địa chỉ email không hợp lệ").max(320).optional()
+});
+
+const updatePasswordSchema = z.object({
+  current_password: z.string().min(1).max(128),
+  new_password: z.string().min(8).max(128)
+});
+
 router.get("/user/me", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
+    res.json({ user: await loadUserProfile(userId(req)) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.put("/user/me", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
     const id = userId(req);
-    let result = await supabase.from("users").select("id,email,full_name,credits,is_admin").eq("id", id).single();
-    if (isMissingAdminColumn(result.error)) {
-      const fallback = await supabase.from("users").select("id,email,full_name,credits").eq("id", id).single();
-      result = { ...fallback, data: fallback.data ? { ...fallback.data, is_admin: false } : null } as typeof result;
+    const body = parseBody(updateProfileSchema, req.body);
+    const normalizedPhone = body.phone.replace(/[\s.()-]/g, "");
+    if (normalizedPhone && !/^(?:\+?84|0)(?:[35789]\d{8}|2\d{9})$/.test(normalizedPhone)) {
+      throw new HttpError(400, "Số điện thoại chưa đúng định dạng Việt Nam (ví dụ: 0912345678 hoặc +84912345678).");
     }
-    if (result.error) throw result.error;
-    res.json({ user: { ...result.data, is_admin: Boolean(result.data.is_admin), payments_enabled: paymentsEnabled } });
+
+    const current = await loadUserProfile(id);
+    const nextEmail = body.email ?? current.email.toLowerCase();
+    const emailChanged = nextEmail !== current.email.toLowerCase();
+
+    if (emailChanged) {
+      const { data: existing } = await supabase
+        .from("users")
+        .select("id")
+        .ilike("email", nextEmail)
+        .neq("id", id)
+        .maybeSingle();
+      if (existing) {
+        throw new HttpError(409, "Địa chỉ email này đã được sử dụng bởi một tài khoản khác.");
+      }
+    }
+
+    const authUser = await supabase.auth.admin.getUserById(id).catch(() => null);
+    const existingMeta = (authUser?.data?.user?.user_metadata ?? {}) as Record<string, unknown>;
+    const { error: authUpdateError } = await supabase.auth.admin.updateUserById(id, {
+      ...(emailChanged ? { email: nextEmail, email_confirm: true } : {}),
+      user_metadata: { ...existingMeta, full_name: body.full_name, phone: normalizedPhone }
+    });
+    if (authUpdateError) throw new HttpError(400, authUpdateError.message);
+
+    let updateRes = await supabase
+      .from("users")
+      .update({ full_name: body.full_name, phone: normalizedPhone, email: nextEmail })
+      .eq("id", id);
+
+    if (updateRes.error && /phone/i.test(updateRes.error.message)) {
+      updateRes = await supabase
+        .from("users")
+        .update({ full_name: body.full_name, email: nextEmail })
+        .eq("id", id);
+    }
+    if (updateRes.error) throw updateRes.error;
+
+    res.json({
+      user: await loadUserProfile(id),
+      message: "Đã cập nhật thông tin hồ sơ thành công."
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.put("/user/password", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = userId(req);
+    const body = parseBody(updatePasswordSchema, req.body);
+    if (body.current_password === body.new_password) {
+      throw new HttpError(400, "Mật khẩu mới phải khác mật khẩu hiện tại.");
+    }
+    const current = await loadUserProfile(id);
+    const { error: verifyError } = await authClient.auth.signInWithPassword({
+      email: current.email,
+      password: body.current_password
+    });
+    if (verifyError) {
+      throw new HttpError(401, "Mật khẩu hiện tại không chính xác.");
+    }
+    const { error: updateError } = await supabase.auth.admin.updateUserById(id, {
+      password: body.new_password
+    });
+    if (updateError) throw new HttpError(400, updateError.message);
+    res.json({ updated: true, message: "Đã đổi mật khẩu thành công." });
   } catch (error) {
     sendError(res, error);
   }
@@ -411,6 +548,7 @@ const JOB_PAGE_SIZE = 20;
 const jobListSchema = z.object({
   q: z.string().trim().max(100).optional(),
   city: z.string().trim().max(40).optional(),
+  saved: z.enum(["1", "true", "0", "false"]).optional(),
   page: z.coerce.number().int().min(1).max(1000).default(1)
 });
 
@@ -418,6 +556,40 @@ function jobStoreError(error: { code?: string }) {
   return error.code === "PGRST205"
     ? new HttpError(503, "Kho việc làm chưa sẵn sàng. Hãy chạy migration 004_job_postings.sql rồi chạy npm run jobs:sync.")
     : error;
+}
+
+function isMissingSavedJobsTable(error: { code?: string; message?: string } | null): boolean {
+  return Boolean(error && (error.code === "PGRST205" || /saved_jobs/i.test(error.message ?? "")));
+}
+
+async function loadSavedJobIds(ownerId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("saved_jobs")
+    .select("job_id,created_at")
+    .eq("user_id", ownerId)
+    .order("created_at", { ascending: false });
+
+  if (!error && data) {
+    return data.map((row) => String(row.job_id));
+  }
+  if (error && !isMissingSavedJobsTable(error)) {
+    throw error;
+  }
+
+  const authUser = await supabase.auth.admin.getUserById(ownerId).catch(() => null);
+  const metaIds = authUser?.data?.user?.user_metadata?.saved_job_ids;
+  if (Array.isArray(metaIds)) {
+    return metaIds.filter((item): item is string => typeof item === "string" && z.string().uuid().safeParse(item).success);
+  }
+  return [];
+}
+
+async function syncSavedJobMetadata(ownerId: string, nextIds: string[]) {
+  const authUser = await supabase.auth.admin.getUserById(ownerId).catch(() => null);
+  const existingMeta = (authUser?.data?.user?.user_metadata ?? {}) as Record<string, unknown>;
+  await supabase.auth.admin.updateUserById(ownerId, {
+    user_metadata: { ...existingMeta, saved_job_ids: nextIds.slice(0, 200) }
+  }).catch(() => null);
 }
 
 async function getJobPosting(id: string) {
@@ -432,10 +604,21 @@ router.get("/jobs", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const parsed = jobListSchema.safeParse(req.query);
     if (!parsed.success) throw new HttpError(400, "Invalid job filters");
-    const { q, city, page } = parsed.data;
+    const { q, city, saved, page } = parsed.data;
+    const onlySaved = saved === "1" || saved === "true";
+    const savedIds = await loadSavedJobIds(userId(req));
+
+    if (onlySaved && savedIds.length === 0) {
+      res.json({ jobs: [], total: 0, page, page_size: JOB_PAGE_SIZE, saved_ids: [] });
+      return;
+    }
+
     let query = supabase.from("job_postings")
       .select("id,company,title,location,city,url,posted_at", { count: "exact" })
       .eq("is_active", true);
+    if (onlySaved) {
+      query = query.in("id", savedIds);
+    }
     // These characters are syntax inside PostgREST's or() filter. Each word must appear in the
     // title, company or description, so "backend typescript" finds postings asking for both.
     const words = (q ?? "").replace(/[%_,()*\\"':]/g, " ").split(/\s+/u).filter(Boolean).slice(0, 5);
@@ -449,7 +632,52 @@ router.get("/jobs", requireAuth, async (req: AuthenticatedRequest, res) => {
       .range(from, from + JOB_PAGE_SIZE - 1);
     // PGRST103: the requested page is past the last result.
     if (error && error.code !== "PGRST103") throw jobStoreError(error);
-    res.json({ jobs: data ?? [], total: count ?? 0, page, page_size: JOB_PAGE_SIZE });
+    res.json({ jobs: data ?? [], total: count ?? 0, page, page_size: JOB_PAGE_SIZE, saved_ids: savedIds });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.post("/jobs/:jobId/save", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const jobId = z.string().uuid().safeParse(req.params.jobId);
+    if (!jobId.success) throw new HttpError(400, "Invalid job ID");
+    const ownerId = userId(req);
+    await getJobPosting(jobId.data);
+
+    const { error } = await supabase
+      .from("saved_jobs")
+      .upsert({ user_id: ownerId, job_id: jobId.data }, { onConflict: "user_id,job_id" });
+    if (error && !isMissingSavedJobsTable(error)) throw error;
+
+    const currentIds = await loadSavedJobIds(ownerId);
+    const nextIds = [jobId.data, ...currentIds.filter((id) => id !== jobId.data)];
+    await syncSavedJobMetadata(ownerId, nextIds);
+
+    res.json({ saved: true, saved_ids: nextIds });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.delete("/jobs/:jobId/save", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const jobId = z.string().uuid().safeParse(req.params.jobId);
+    if (!jobId.success) throw new HttpError(400, "Invalid job ID");
+    const ownerId = userId(req);
+
+    const { error } = await supabase
+      .from("saved_jobs")
+      .delete()
+      .eq("user_id", ownerId)
+      .eq("job_id", jobId.data);
+    if (error && !isMissingSavedJobsTable(error)) throw error;
+
+    const currentIds = await loadSavedJobIds(ownerId);
+    const nextIds = currentIds.filter((id) => id !== jobId.data);
+    await syncSavedJobMetadata(ownerId, nextIds);
+
+    res.json({ saved: false, saved_ids: nextIds });
   } catch (error) {
     sendError(res, error);
   }

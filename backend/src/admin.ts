@@ -4,6 +4,14 @@ import { supabase } from "./supabase";
 export const MAX_ADMINS = 3;
 export const MIGRATION_007 = "007_admin_role.sql";
 
+export function deriveUserCode(id: string): string {
+  const clean = id.replace(/[^0-9a-fA-F]/g, "").padEnd(32, "0");
+  const head = Number.parseInt(clean.slice(0, 7), 16) || 0;
+  const tail = Number.parseInt(clean.slice(25, 32), 16) || 0;
+  const seed = head ^ tail;
+  return String(10_000_000 + (seed % 90_000_000));
+}
+
 const emailSchema = z.string().trim().toLowerCase().email().max(320);
 
 export type AdminCandidate = {
@@ -64,6 +72,7 @@ export function validateAdminGrantCandidate(
 
 export type AdminUserSummary = {
   id: string;
+  user_code: string;
   email: string;
   full_name: string;
   created_at: string;
@@ -71,6 +80,7 @@ export type AdminUserSummary = {
 
 export type AdminUserRow = {
   id: string;
+  user_code: string;
   email: string;
   full_name: string;
   credits: number;
@@ -132,7 +142,7 @@ export type AdminOverview = {
 
 type RawOverviewInput = {
   now?: number;
-  users: { id: string; email: string; full_name: string; credits: number; is_admin?: boolean; created_at: string }[];
+  users: { id: string; user_code?: string | null; email: string; full_name: string; credits: number; is_admin?: boolean; created_at: string }[];
   cvCount: number;
   evaluations: { quality_score: number }[];
   analyses: { rci_score: number }[];
@@ -161,7 +171,13 @@ export function buildAdminOverview(input: RawOverviewInput): AdminOverview {
 
   const admins = input.users
     .filter((user) => Boolean(user.is_admin))
-    .map(({ id, email, full_name, created_at }) => ({ id, email, full_name, created_at }));
+    .map(({ id, user_code, email, full_name, created_at }) => ({
+      id,
+      user_code: user_code && /^[0-9]{7,8}$/.test(user_code) ? user_code : deriveUserCode(id),
+      email,
+      full_name,
+      created_at
+    }));
 
   const newLast7d = input.users.filter((user) => {
     const created = Date.parse(user.created_at);
@@ -225,8 +241,9 @@ export function buildAdminOverview(input: RawOverviewInput): AdminOverview {
       last_seen_at: input.lastJobSyncAt
     },
     admins,
-    recent_users: input.users.slice(0, 10).map((user) => ({
+    recent_users: input.users.slice(0, 50).map((user) => ({
       id: user.id,
+      user_code: user.user_code && /^[0-9]{7,8}$/.test(user.user_code) ? user.user_code : deriveUserCode(user.id),
       email: user.email,
       full_name: user.full_name,
       credits: Number(user.credits) || 0,
@@ -242,7 +259,7 @@ export function isMissingAdminColumn(error: { message?: string } | null): boolea
 
 export async function fetchAdminOverview(): Promise<AdminOverview> {
   const [
-    usersRes,
+    usersWithCodeRes,
     cvCountRes,
     evalsRes,
     analysesRes,
@@ -252,7 +269,7 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
     jobsCountRes,
     latestJobRes
   ] = await Promise.all([
-    supabase.from("users").select("id,email,full_name,credits,is_admin,created_at").order("created_at", { ascending: false }),
+    supabase.from("users").select("id,user_code,email,full_name,credits,is_admin,created_at").order("created_at", { ascending: false }),
     supabase.from("cv_documents").select("id", { count: "exact", head: true }),
     supabase.from("cv_evaluations").select("quality_score"),
     supabase.from("analyses").select("rci_score"),
@@ -262,6 +279,15 @@ export async function fetchAdminOverview(): Promise<AdminOverview> {
     supabase.from("job_postings").select("id", { count: "exact", head: true }).eq("is_active", true),
     supabase.from("job_postings").select("last_seen_at").order("last_seen_at", { ascending: false }).limit(1).maybeSingle()
   ]);
+
+  let usersRes = usersWithCodeRes;
+  if (usersRes.error && /user_code/i.test(usersRes.error.message)) {
+    const fallbackUsers = await supabase
+      .from("users")
+      .select("id,email,full_name,credits,is_admin,created_at")
+      .order("created_at", { ascending: false });
+    usersRes = fallbackUsers as typeof usersWithCodeRes;
+  }
 
   if (usersRes.error) throw usersRes.error;
   if (cvCountRes.error) throw cvCountRes.error;

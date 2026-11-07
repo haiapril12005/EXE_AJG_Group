@@ -5,7 +5,65 @@
 -- 3. Hard cap on admin count: at most 3 accounts may hold is_admin = true at any time.
 
 alter table public.users
-  add column if not exists is_admin boolean not null default false;
+  add column if not exists is_admin boolean not null default false,
+  add column if not exists phone text not null default '',
+  add column if not exists user_code text;
+
+create or replace function public.generate_unique_user_code(p_user_id uuid default null)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  clean_hex text;
+  seed_val integer;
+  candidate text;
+  attempt integer := 0;
+begin
+  clean_hex := rpad(regexp_replace(coalesce(p_user_id::text, gen_random_uuid()::text), '[^0-9a-fA-F]', '', 'g'), 32, '0');
+  seed_val := (('x0' || substr(clean_hex, 1, 7))::bit(32)::int) # (('x0' || substr(clean_hex, 26, 7))::bit(32)::int);
+  loop
+    candidate := (10000000 + ((seed_val + attempt) % 90000000))::text;
+    if not exists (
+      select 1 from public.users u
+      where u.user_code = candidate
+        and (p_user_id is null or u.id <> p_user_id)
+    ) then
+      return candidate;
+    end if;
+    attempt := attempt + 1;
+  end loop;
+end;
+$$;
+
+create or replace function public.ensure_user_code()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.user_code is null or new.user_code !~ '^[0-9]{7,8}$' then
+    new.user_code := public.generate_unique_user_code(new.id);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists ensure_user_code_trigger on public.users;
+create trigger ensure_user_code_trigger
+  before insert or update on public.users
+  for each row execute procedure public.ensure_user_code();
+
+update public.users
+set user_code = public.generate_unique_user_code(id)
+where user_code is null or user_code !~ '^[0-9]{7,8}$';
+
+alter table public.users
+  alter column user_code set not null;
+
+create unique index if not exists users_user_code_idx on public.users (user_code);
 
 create or replace function public.enforce_admin_assignment_rules()
 returns trigger
@@ -91,10 +149,11 @@ begin
   select * into target_user
   from public.users
   where lower(btrim(email)) = normalized_email
+     or btrim(user_code) = normalized_email
   for update;
 
   if not found then
-    raise exception 'ADMIN_RULE_USER_NOT_FOUND: Không tìm thấy tài khoản với email % trong hệ thống.', normalized_email;
+    raise exception 'ADMIN_RULE_USER_NOT_FOUND: Không tìm thấy tài khoản với email hoặc mã ID % trong hệ thống.', normalized_email;
   end if;
 
   select u.email_confirmed_at into confirmed_at
@@ -128,6 +187,7 @@ begin
 
   return jsonb_build_object(
     'id', target_user.id,
+    'user_code', target_user.user_code,
     'email', target_user.email,
     'full_name', target_user.full_name,
     'is_admin', target_user.is_admin,
@@ -149,16 +209,17 @@ declare
   admin_count integer;
 begin
   if normalized_email = '' then
-    raise exception 'ADMIN_RULE_INVALID_EMAIL: Email không hợp lệ.';
+    raise exception 'ADMIN_RULE_INVALID_EMAIL: Email hoặc mã ID không hợp lệ.';
   end if;
 
   select * into target_user
   from public.users
   where lower(btrim(email)) = normalized_email
+     or btrim(user_code) = normalized_email
   for update;
 
   if not found then
-    raise exception 'ADMIN_RULE_USER_NOT_FOUND: Không tìm thấy tài khoản với email % trong hệ thống.', normalized_email;
+    raise exception 'ADMIN_RULE_USER_NOT_FOUND: Không tìm thấy tài khoản với email hoặc mã ID % trong hệ thống.', normalized_email;
   end if;
 
   if target_user.is_admin then
@@ -176,6 +237,7 @@ begin
 
   return jsonb_build_object(
     'id', target_user.id,
+    'user_code', target_user.user_code,
     'email', target_user.email,
     'full_name', target_user.full_name,
     'is_admin', target_user.is_admin,
@@ -190,11 +252,36 @@ revoke all on function public.revoke_admin_role(text) from public, anon, authent
 grant execute on function public.grant_admin_role(text) to service_role;
 grant execute on function public.revoke_admin_role(text) to service_role;
 
--- To promote a verified user in SQL Editor, run:
--- select public.grant_admin_role('your-email@example.com');
+-- Saved jobs ("Xem sau" / bookmarked job postings persisted across sessions):
+create table if not exists public.saved_jobs (
+  user_id uuid not null references public.users(id) on delete cascade,
+  job_id uuid not null references public.job_postings(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, job_id)
+);
 
--- Display current users and their admin role status after running this script:
-select id, email, full_name, is_admin, credits, created_at
+create index if not exists saved_jobs_user_created_idx on public.saved_jobs (user_id, created_at desc);
+
+alter table public.saved_jobs enable row level security;
+
+drop policy if exists "Users can view their own saved jobs" on public.saved_jobs;
+create policy "Users can view their own saved jobs" on public.saved_jobs
+  for select to authenticated using (auth.uid() = user_id);
+
+drop policy if exists "Users can save jobs for themselves" on public.saved_jobs;
+create policy "Users can save jobs for themselves" on public.saved_jobs
+  for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "Users can remove their own saved jobs" on public.saved_jobs;
+create policy "Users can remove their own saved jobs" on public.saved_jobs
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- To promote a verified user in SQL Editor (by email or 8-digit user_code), run:
+-- select public.grant_admin_role('your-email@example.com');
+-- select public.grant_admin_role('81047992');
+
+-- Display current users and their 8-digit user_code + admin role status after running this script:
+select user_code, id, email, full_name, phone, is_admin, credits, created_at
 from public.users
 order by is_admin desc, created_at desc;
 

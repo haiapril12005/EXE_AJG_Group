@@ -210,9 +210,12 @@ test("signup verifies an entered OTP, rejects expired code, then requires a pass
   await page.getByLabel("Email", { exact: true }).fill(EMAIL);
   await page.getByLabel("Mật khẩu", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Đăng xuất" })).toBeVisible();
+  const accountMenu = page.getByRole("button", { name: "Menu tài khoản" });
+  await expect(accountMenu).toBeVisible();
   await expect(page).toHaveURL(/\/jobs$/);
   await expect(page.getByText("OTP Demo", { exact: true })).toBeVisible();
+  await accountMenu.click();
+  await expect(page.getByRole("menuitem", { name: "Đăng xuất" })).toBeVisible();
   expect(calls.filter((call) => call.path.endsWith("/verify")).map((call) => ({
     email: call.body.email, token: call.body.token, type: call.body.type,
   }))).toEqual([

@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../utils/api";
-import { useApp } from "../app-frame";
+import { formatUserCode, useApp } from "../app-frame";
 
 type AdminUserSummary = {
   id: string;
+  user_code?: string;
   email: string;
   full_name: string;
   created_at: string;
@@ -14,6 +15,7 @@ type AdminUserSummary = {
 
 type AdminUserRow = {
   id: string;
+  user_code?: string;
   email: string;
   full_name: string;
   credits: number;
@@ -29,7 +31,7 @@ type AdminTransactionItem = {
   user_email: string | null;
 };
 
-export type AdminOverview = {
+type AdminOverview = {
   generated_at: string;
   rules: {
     max_admins: number;
@@ -87,6 +89,7 @@ export default function AdminPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [userSearch, setUserSearch] = useState("");
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
@@ -210,15 +213,18 @@ export default function AdminPage() {
             <section className="soft-card">
               <h3>Quản trị viên ({overview.rules.current_admins}/{overview.rules.max_admins})</h3>
               <div className="admin-list">
-                {overview.admins.map((admin) => (
-                  <div key={admin.id} className="history-item">
-                    <div>
-                      <strong>{admin.full_name || "Quản trị viên"}</strong>
-                      <small className="admin-subline">{admin.email}</small>
+                {overview.admins.map((admin) => {
+                  const code = admin.user_code || formatUserCode(admin.id);
+                  return (
+                    <div key={admin.id} className="history-item">
+                      <div>
+                        <strong>{admin.full_name || "Quản trị viên"} · <code className="profile-id-code">ID: {code}</code></strong>
+                        <small className="admin-subline">{admin.email}</small>
+                      </div>
+                      <small>{new Date(admin.created_at).toLocaleDateString("vi-VN")}</small>
                     </div>
-                    <small>{new Date(admin.created_at).toLocaleDateString("vi-VN")}</small>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="scoring-breakdown admin-rules-box">
                 <strong>Quy tắc bảo mật cấp quyền Admin</strong>
@@ -226,28 +232,53 @@ export default function AdminPage() {
                 <p><span>2. Giới hạn số lượng</span><b>Tối đa {overview.rules.max_admins} Admin (còn trống {overview.rules.remaining_slots})</b></p>
                 <p><span>3. Phương thức cấp quyền</span><b>Chỉ qua CLI/SQL bằng Secret Key</b></p>
                 <small>
-                  Lệnh gán quyền: <code>npm.cmd run admin:grant -- email@domain.com</code> · Thu hồi: <code>npm.cmd run admin:revoke -- email@domain.com</code>
+                  Lệnh gán quyền (theo Email hoặc Mã ID 8 số): <code>npm.cmd run admin:grant -- &lt;email_hoặc_mã_ID&gt;</code> · Thu hồi: <code>npm.cmd run admin:revoke -- &lt;email_hoặc_mã_ID&gt;</code>
                 </small>
               </div>
             </section>
 
             {overview.recent_users && overview.recent_users.length > 0 && (
               <section className="soft-card admin-span-full">
-                <h3>Danh sách người dùng hệ thống ({overview.users.total})</h3>
+                <div className="admin-users-header">
+                  <h3>Danh sách người dùng hệ thống ({overview.users.total})</h3>
+                  <input
+                    type="search"
+                    className="form-input admin-user-search"
+                    placeholder="Tìm theo mã ID (8 số), email hoặc họ tên..."
+                    value={userSearch}
+                    onChange={(event) => setUserSearch(event.target.value)}
+                  />
+                </div>
                 <div className="admin-list">
-                  {overview.recent_users.map((user) => (
-                    <div key={user.id} className="history-item admin-tx-item">
-                      <div>
-                        <strong>{user.full_name || "Chưa đặt tên"} · <span className="muted-copy">{user.email}</span></strong>
-                        <small className="admin-subline">
-                          Credits: {user.credits} · Tạo ngày {new Date(user.created_at).toLocaleDateString("vi-VN")}
-                        </small>
-                      </div>
-                      <span className={`admin-badge ${user.is_admin ? "admin-badge-success" : "admin-badge-neutral"}`}>
-                        {user.is_admin ? "ADMIN" : "USER"}
-                      </span>
-                    </div>
-                  ))}
+                  {overview.recent_users
+                    .filter((user) => {
+                      const q = userSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      const code = user.user_code || formatUserCode(user.id);
+                      return (
+                        code.includes(q) ||
+                        user.email.toLowerCase().includes(q) ||
+                        (user.full_name || "").toLowerCase().includes(q)
+                      );
+                    })
+                    .map((user) => {
+                      const code = user.user_code || formatUserCode(user.id);
+                      return (
+                        <div key={user.id} className="history-item admin-tx-item">
+                          <div>
+                            <strong>
+                              <code className="profile-id-code">ID: {code}</code> · {user.full_name || "Chưa đặt tên"} · <span className="muted-copy">{user.email}</span>
+                            </strong>
+                            <small className="admin-subline">
+                              Credits: {user.credits} · Tạo ngày {new Date(user.created_at).toLocaleDateString("vi-VN")}
+                            </small>
+                          </div>
+                          <span className={`admin-badge ${user.is_admin ? "admin-badge-success" : "admin-badge-neutral"}`}>
+                            {user.is_admin ? "ADMIN" : "USER"}
+                          </span>
+                        </div>
+                      );
+                    })}
                 </div>
               </section>
             )}
