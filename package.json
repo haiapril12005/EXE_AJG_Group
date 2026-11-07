@@ -15,7 +15,10 @@
     "test:auth-ui": "playwright test",
     "db:check": "node scripts/check-supabase.mjs",
     "jobs:sync": "npm run jobs:sync --workspace backend --",
-    "auth:check": "node scripts/check-auth-email.mjs"
+    "auth:check": "node scripts/check-auth-email.mjs",
+    "admin:list": "node scripts/manage-admin.mjs list",
+    "admin:grant": "node scripts/manage-admin.mjs grant",
+    "admin:revoke": "node scripts/manage-admin.mjs revoke"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

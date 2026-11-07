@@ -1,6 +1,7 @@
 import { Router, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
+import { fetchAdminOverview, isMissingAdminColumn, MIGRATION_007 } from "./admin";
 import { analyzeCVvsJD, evaluateInterviewAnswer, generateCvQualityFeedback, generateMockQuestions, rewriteSection, rewriteSectionSchema, structureCV } from "./aiService";
 import { cvDataSchema, cvDataToText, emptyCvData, extractContacts, extractLinks, maskText, stripNul, type CvData } from "./cvData";
 import { inspectCvQuality, scoreQualityIssues } from "./cvQuality";
@@ -117,9 +118,30 @@ router.post("/auth/login", async (req, res) => {
 router.get("/user/me", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const id = userId(req);
-    const { data, error } = await supabase.from("users").select("id,email,full_name,credits").eq("id", id).single();
+    let result = await supabase.from("users").select("id,email,full_name,credits,is_admin").eq("id", id).single();
+    if (isMissingAdminColumn(result.error)) {
+      const fallback = await supabase.from("users").select("id,email,full_name,credits").eq("id", id).single();
+      result = { ...fallback, data: fallback.data ? { ...fallback.data, is_admin: false } : null } as typeof result;
+    }
+    if (result.error) throw result.error;
+    res.json({ user: { ...result.data, is_admin: Boolean(result.data.is_admin), payments_enabled: paymentsEnabled } });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/admin/overview", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = userId(req);
+    const { data, error } = await supabase.from("users").select("id,is_admin").eq("id", id).maybeSingle();
+    if (isMissingAdminColumn(error)) {
+      throw new HttpError(503, `Chức năng quản trị chưa sẵn sàng. Hãy chạy migration ${MIGRATION_007} trước.`);
+    }
     if (error) throw error;
-    res.json({ user: { ...data, payments_enabled: paymentsEnabled } });
+    if (!data?.is_admin) {
+      throw new HttpError(403, "Chỉ tài khoản quản trị (Admin) mới có quyền truy cập trang thống kê này.");
+    }
+    res.json({ overview: await fetchAdminOverview() });
   } catch (error) {
     sendError(res, error);
   }

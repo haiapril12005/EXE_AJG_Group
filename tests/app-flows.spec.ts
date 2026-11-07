@@ -90,9 +90,9 @@ async function reply(route: Route, status: number, body: unknown) {
   });
 }
 
-type Options = { jobsStatus?: number; savedCvs?: boolean; structured?: boolean; interview?: Interview };
+type Options = { jobsStatus?: number; savedCvs?: boolean; structured?: boolean; interview?: Interview; isAdmin?: boolean };
 
-async function mockServices(context: BrowserContext, { jobsStatus = 200, savedCvs = true, structured = true, interview = INTERVIEW }: Options = {}) {
+async function mockServices(context: BrowserContext, { jobsStatus = 200, savedCvs = true, structured = true, interview = INTERVIEW, isAdmin = false }: Options = {}) {
   const posts: { method: string; path: string; body: Record<string, unknown> }[] = [];
   const unexpected: string[] = [];
   await context.route("**/*", async (route) => {
@@ -110,7 +110,29 @@ async function mockServices(context: BrowserContext, { jobsStatus = 200, savedCv
       const method = request.method();
       if (method !== "GET") posts.push({ method, path, body: request.postDataJSON() ?? {} });
       const page = url.searchParams.get("page") ?? "1";
-      if (path === "/user/me") return reply(route, 200, { user: { id: USER_ID, email: EMAIL, full_name: "Flow Demo", credits: 0, payments_enabled: false } });
+      if (path === "/user/me") return reply(route, 200, { user: { id: USER_ID, email: EMAIL, full_name: "Flow Demo", credits: 0, is_admin: isAdmin, payments_enabled: false } });
+      if (path === "/admin/overview") {
+        if (!isAdmin) return reply(route, 403, { error: "Chỉ tài khoản quản trị (Admin) mới có quyền truy cập trang thống kê này." });
+        return reply(route, 200, {
+          overview: {
+            generated_at: "2026-11-07T00:00:00.000Z",
+            rules: { max_admins: 3, current_admins: 1, remaining_slots: 2 },
+            users: { total: 12, admins: 1, new_last_7d: 4, total_credits: 18 },
+            cvs: { total: 15, evaluations_total: 9, avg_quality_score: 82 },
+            analyses: { total: 20, avg_rci_score: 71, high_match_count: 11 },
+            interviews: { total: 8, completed: 5, in_progress: 3, answers_total: 19 },
+            revenue: {
+              total_vnd: 87000,
+              success_count: 3,
+              pending_count: 1,
+              cancelled_count: 0,
+              recent_transactions: [{ order_code: 9001, amount: 29000, status: "SUCCESS", created_at: "2026-11-06T00:00:00.000Z", user_email: EMAIL }]
+            },
+            jobs: { active_count: 35, last_seen_at: "2026-11-07T00:00:00.000Z" },
+            admins: [{ id: USER_ID, email: EMAIL, full_name: "Flow Demo", created_at: "2026-01-01T00:00:00.000Z" }]
+          }
+        });
+      }
       if (path === "/cv") {
         // Two saved CVs, one per page, so the history can page through them.
         const cvs = !savedCvs ? [] : page === "1"
@@ -495,4 +517,22 @@ test("an interviewer follow-up can be answered and the earlier attempt stays vis
     answer_text: "I measured p95 latency with k6 before and after.",
   });
   expect(unexpected).toEqual([]);
+});
+
+test("admin overview is hidden from regular users and visible to verified admins", async ({ page, context }) => {
+  await mockServices(context, { isAdmin: false });
+  await signIn(page);
+  await expect(page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Quản trị" })).toHaveCount(0);
+  await page.goto("/admin");
+  await expect(page.getByRole("status")).toContainText("Chỉ tài khoản quản trị (Admin) mới có quyền truy cập");
+
+  await mockServices(context, { isAdmin: true });
+  await page.goto("/");
+  const adminLink = page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Quản trị" });
+  await expect(adminLink).toBeVisible();
+  await adminLink.click();
+  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page.getByRole("heading", { name: "Thống kê tổng quan hệ thống" })).toBeVisible();
+  await expect(page.getByText("87.000đ")).toBeVisible();
+  await expect(page.getByText("Quản trị viên (1/3)")).toBeVisible();
 });

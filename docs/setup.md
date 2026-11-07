@@ -29,8 +29,17 @@ Trong Supabase SQL Editor, chạy các file sau **theo thứ tự**, mỗi file 
 4. `supabase/migrations/004_job_postings.sql`
 5. `supabase/migrations/005_interview_practice.sql`
 6. `supabase/migrations/006_job_sources_lever_ashby.sql`
+7. `supabase/migrations/007_admin_role.sql`
 
-Chỉ cần chạy các file chưa chạy. Migration 003 thêm bảng đánh giá CV, phiên phỏng vấn, câu trả lời và các cột chứng cứ/điểm có trọng số. Migration 004 thêm kho việc làm `job_postings`, cột `analyses.job_id` và cho phép phiên phỏng vấn nhanh không gắn với báo cáo phân tích. Migration 005 lưu các lần trả lời trước, câu hỏi nối tiếp của người phỏng vấn AI và cho phép phiên luyện 5 câu; khi chưa chạy, phỏng vấn vẫn hoạt động nhưng trả lời lại sẽ ghi đè, không có câu hỏi nối tiếp và chỉ luyện được 3 câu. Migration 006 cho kho việc làm nhận thêm tin từ Lever và Ashby; khi chưa chạy, các nguồn cũ vẫn đồng bộ bình thường, còn nguồn Lever/Ashby báo lỗi kèm tên file cần chạy. Tạo tài khoản bằng giao diện để trigger tạo hồ sơ người dùng; credit trong schema không bị sử dụng khi PayOS chưa bật.
+Chỉ cần chạy các file chưa chạy. Migration 003 thêm bảng đánh giá CV, phiên phỏng vấn, câu trả lời và các cột chứng cứ/điểm có trọng số. Migration 004 thêm kho việc làm `job_postings`, cột `analyses.job_id` và cho phép phiên phỏng vấn nhanh không gắn với báo cáo phân tích. Migration 005 lưu các lần trả lời trước, câu hỏi nối tiếp của người phỏng vấn AI và cho phép phiên luyện 5 câu; khi chưa chạy, phỏng vấn vẫn hoạt động nhưng trả lời lại sẽ ghi đè, không có câu hỏi nối tiếp và chỉ luyện được 3 câu. Migration 006 cho kho việc làm nhận thêm tin từ Lever và Ashby; khi chưa chạy, các nguồn cũ vẫn đồng bộ bình thường, còn nguồn Lever/Ashby báo lỗi kèm tên file cần chạy. Migration 007 thêm quyền quản trị (`users.is_admin`) kèm trigger kiểm soát 3 quy tắc bảo mật (tài khoản đã xác thực email OTP, tối đa 3 Admin toàn hệ thống, và chỉ gán qua CLI/SQL bằng `SUPABASE_SECRET_KEY`). Tạo tài khoản bằng giao diện để trigger tạo hồ sơ người dùng; credit trong schema không bị sử dụng khi PayOS chưa bật.
+
+Để gán hoặc thu hồi quyền quản trị (Admin) sau khi người dùng đã đăng ký và xác thực email OTP:
+
+```powershell
+npm.cmd run admin:list
+npm.cmd run admin:grant -- ten-email@example.com
+npm.cmd run admin:revoke -- ten-email@example.com
+```
 
 Để người dùng xác nhận đăng ký bằng mã gửi tới email, làm thêm các bước [cấu hình email OTP](email-otp.md): bật Confirm email, cập nhật mẫu Confirm sign up và cấu hình SMTP. API key trong `.env` không tự bật dịch vụ gửi thư tới mọi người dùng.
 

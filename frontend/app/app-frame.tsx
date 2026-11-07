@@ -15,6 +15,7 @@ export type Profile = {
   email: string;
   full_name: string;
   credits: number;
+  is_admin?: boolean;
   payments_enabled: boolean;
 };
 
@@ -99,9 +100,24 @@ export function AppFrame({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshProfile = useCallback(async () => {
-    const result = await api<{ user: Profile }>("/user/me", token);
-    setProfile(result.user);
-  }, [token]);
+    try {
+      const result = await api<{ user: Profile }>("/user/me", token);
+      if (result.user.is_admin === undefined && userId) {
+        const { data } = await supabase.from("users").select("is_admin").eq("id", userId).maybeSingle();
+        result.user.is_admin = Boolean(data?.is_admin);
+      }
+      setProfile(result.user);
+    } catch (error) {
+      if (userId) {
+        const { data } = await supabase.from("users").select("id,email,full_name,credits,is_admin").eq("id", userId).maybeSingle();
+        if (data) {
+          setProfile({ ...data, is_admin: Boolean(data.is_admin), payments_enabled: false });
+          return;
+        }
+      }
+      throw error;
+    }
+  }, [token, userId]);
 
   useEffect(() => {
     if (userId) void refreshProfile().catch((error: Error) => setNotice(error.message));
@@ -132,7 +148,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
           <div className="header-inner">
             <Brand />
             <nav className="app-nav" aria-label="Điều hướng chính">
-              {NAV_ITEMS.map((item) => {
+              {[...NAV_ITEMS, ...(profile?.is_admin ? [{ href: "/admin", label: "Quản trị" }] : [])].map((item) => {
                 const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
                 return <Link key={item.href} href={item.href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}>{item.label}</Link>;
               })}
@@ -143,6 +159,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
               <div className="profile-chip">
                 <span className="avatar">{(profile?.full_name || session.user.email || "U").trim().charAt(0).toUpperCase()}</span>
                 <span className="profile-name">{profile?.full_name || session.user.email}</span>
+                {profile?.is_admin && <Link href="/admin" className="admin-role-pill">ADMIN</Link>}
               </div>
               {profile?.payments_enabled && <span className="credits-chip">Credits <strong>{profile.credits}</strong></span>}
               <button className="text-button" onClick={() => void signOut()}>Đăng xuất</button>
