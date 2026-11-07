@@ -165,6 +165,10 @@ async function signIn(page: Page) {
   await page.getByLabel("Mật khẩu", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
   await expect(page.getByRole("button", { name: "Đăng xuất" })).toBeVisible();
+  // Signing in opens the job list; these tests start from the analysis page.
+  await expect(page).toHaveURL(/\/jobs$/);
+  await page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Phân tích" }).click();
+  await expect(page).toHaveURL(/\/$/);
 }
 
 test("the report sits beside the CV, survives a reload and can be left", async ({ page, context }) => {

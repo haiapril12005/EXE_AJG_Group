@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { api } from "../utils/api";
@@ -61,6 +61,7 @@ function ThemeToggle({ theme, onToggle }: { theme: "light" | "dark"; onToggle: (
 
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -108,6 +109,13 @@ export function AppFrame({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  // Signing in from the home page opens the job list. A link to a specific page (a shared report,
+  // an interview) stays on that page after sign-in.
+  function signedIn(next: Session) {
+    if (pathname === "/") router.replace("/jobs");
+    setSession(next);
+  }
+
   async function signOut() {
     const { error } = await supabase.auth.signOut();
     if (error) setNotice(`Không thể đăng xuất: ${error.message}`);
@@ -115,7 +123,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
 
   const themeClass = theme === "dark" ? "theme-dark" : "";
   if (authLoading) return <main className={`app-shell loading-shell ${themeClass}`}><p>Đang kiểm tra phiên đăng nhập...</p></main>;
-  if (!session) return <AuthScreen onSession={setSession} header={<Brand />} />;
+  if (!session) return <AuthScreen onSession={signedIn} header={<Brand />} />;
 
   return (
     <AppContext.Provider value={{ session, token, profile, refreshProfile }}>
