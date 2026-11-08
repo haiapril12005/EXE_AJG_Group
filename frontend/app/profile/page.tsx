@@ -9,12 +9,13 @@ import {
   passwordStrength
 } from "../../utils/auth-flow";
 import { formatUserCode, useApp, type Profile } from "../app-frame";
+import { EmailChangeCard } from "./email-change";
+import { AvatarEditor } from "./avatar-editor";
 
 export default function ProfilePage() {
   const { session, token, profile, refreshProfile, signOut } = useApp();
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
   const [savingInfo, setSavingInfo] = useState(false);
   const [infoNotice, setInfoNotice] = useState<{ text: string; error?: boolean } | null>(null);
 
@@ -33,7 +34,6 @@ export default function ProfilePage() {
   useEffect(() => {
     setFullName(profile?.full_name ?? (session.user.user_metadata?.full_name as string | undefined) ?? "");
     setPhone(profile?.phone ?? (session.user.user_metadata?.phone as string | undefined) ?? "");
-    setEmail(profile?.email ?? session.user.email ?? "");
   }, [profile, session.user]);
 
   async function copyUserId() {
@@ -56,8 +56,7 @@ export default function ProfilePage() {
         method: "PUT",
         body: JSON.stringify({
           full_name: fullName.trim(),
-          phone: phone.trim(),
-          email: email.trim().toLowerCase()
+          phone: phone.trim()
         })
       });
       await refreshProfile();
@@ -120,9 +119,7 @@ export default function ProfilePage() {
 
       <section className="soft-card profile-hero-card">
         <div className="profile-hero-main">
-          <span className="profile-avatar-lg">
-            {String(displayName).trim().charAt(0).toUpperCase()}
-          </span>
+          <AvatarEditor letter={String(displayName).trim().charAt(0).toUpperCase()} />
           <div className="profile-hero-info">
             <div className="profile-title-row">
               <h2>{displayName}</h2>
@@ -158,7 +155,7 @@ export default function ProfilePage() {
             <span className="step-badge">1</span>
             <div>
               <h2>Thông tin cá nhân</h2>
-              <p>Cập nhật họ tên, số điện thoại và địa chỉ email của bạn</p>
+              <p>Cập nhật họ tên và số điện thoại của bạn</p>
             </div>
           </div>
 
@@ -191,16 +188,8 @@ export default function ProfilePage() {
 
             <label className="field-label">
               Địa chỉ Email
-              <input
-                required
-                type="email"
-                maxLength={320}
-                className="form-input"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="email@example.com"
-                disabled={savingInfo}
-              />
+              <input type="email" className="form-input" value={profile?.email || session.user.email || ""} readOnly disabled />
+              <small className="muted-copy">Đổi email ở mục Đổi email bên dưới để xác nhận bằng mã.</small>
             </label>
 
             {infoNotice && (
@@ -312,6 +301,8 @@ export default function ProfilePage() {
           </form>
         </section>
       </div>
+
+      <EmailChangeCard />
 
       <section className="soft-card input-card profile-logout-card">
         <div>

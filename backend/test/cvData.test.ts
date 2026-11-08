@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { cvDataSchema, cvDataToText, emptyCvData, extractContacts, extractLinks, maskText, stripNul } from "../src/cvData";
+import { CV_TEMPLATE_IDS, MAX_IMAGE_DATA_URL } from "../src/cvData";
 
 test("NUL characters from PDF text are removed so Postgres can store it", () => {
   assert.equal(stripNul("Ph\u0000ân tích CV\u0000"), "Phân tích CV");
@@ -80,4 +82,34 @@ test("new CV fields reach the text that is analyzed", () => {
   assert.match(text, /Tiếng Anh - IELTS 7\.0/);
   assert.match(text, /AWS SAA - Amazon - 2025/);
   assert.match(text, /GitHub: github\.com\/a/);
+});
+
+test("every template the CV editor offers is one the API accepts, and the other way round", () => {
+  const editor = readFileSync(new URL("../../frontend/app/cv-editor.tsx", import.meta.url), "utf8");
+  const start = editor.indexOf("export const CV_TEMPLATES");
+  const block = editor.slice(start, editor.indexOf("] as const;", start));
+  const offered = [...block.matchAll(/id: "([a-z-]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(offered, [...CV_TEMPLATE_IDS]);
+  for (const template of CV_TEMPLATE_IDS) {
+    assert.equal(cvDataSchema.safeParse({ template }).success, true, template);
+  }
+  assert.equal(cvDataSchema.safeParse({ template: "unknown" }).success, false);
+});
+
+test("a CV photo must be a JPEG, PNG or WebP data URL of bounded size, and never reaches the analyzed text", () => {
+  const photo = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==";
+  assert.equal(cvDataSchema.parse({ photo }).photo, photo);
+  assert.equal(cvDataSchema.parse({}).photo, "");
+  for (const bad of [
+    "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+    "data:text/html;base64,PGI+aGk8L2I+",
+    "javascript:alert(1)",
+    "https://example.com/photo.jpg",
+    "data:image/jpeg;base64,<script>alert(1)</script>",
+    `data:image/jpeg;base64,${"A".repeat(MAX_IMAGE_DATA_URL)}`
+  ]) {
+    assert.equal(cvDataSchema.safeParse({ photo: bad }).success, false, bad.slice(0, 40));
+  }
+  const text = cvDataToText(cvDataSchema.parse({ photo, personal_info: { name: "Minh Anh" } }));
+  assert.equal(text.includes("base64"), false);
 });

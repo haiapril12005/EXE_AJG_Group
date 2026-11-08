@@ -29,7 +29,7 @@ try {
   if (!auth.ok) failed = true;
 
   const tables = [
-    ["users", "id,is_admin"], ["cv_documents", "cv_data"],
+    ["users", "id,is_admin,avatar"], ["cv_documents", "cv_data"],
     ["analyses", "requirements,scoring_breakdown,job_id"], ["transactions", "id"],
     ["cv_evaluations", "id"], ["interview_sessions", "id"],
     ["interview_answers", "session_id,previous_attempts,follow_up"], ["job_postings", "id"]

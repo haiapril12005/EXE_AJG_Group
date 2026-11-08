@@ -190,7 +190,7 @@ export default function JobsPage() {
                 {job.posted_at && <small>{new Date(job.posted_at).toLocaleDateString("vi-VN")}</small>}
               </div>
               <div className="job-card-actions">
-                <Link href={`/?job=${job.id}`} className="primary-button">Phân tích với CV của tôi</Link>
+                <Link href={`/analyze?job=${job.id}`} className="primary-button">Phân tích với CV của tôi</Link>
                 <button type="button" className="secondary-button" aria-expanded={openJob === job.id} onClick={() => void toggleJob(job.id)}>{openJob === job.id ? "Ẩn mô tả" : "Xem mô tả"}</button>
                 <button
                   type="button"

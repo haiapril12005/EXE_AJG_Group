@@ -1,9 +1,11 @@
-import { Router, type Response } from "express";
+import { Router, type NextFunction, type Response } from "express";
+import rateLimit from "express-rate-limit";
 import multer from "multer";
 import { z } from "zod";
-import { deriveUserCode, fetchAdminOverview, isMissingAdminColumn, MIGRATION_007 } from "./admin";
-import { analyzeCVvsJD, evaluateInterviewAnswer, generateCvQualityFeedback, generateMockQuestions, rewriteSection, rewriteSectionSchema, structureCV } from "./aiService";
-import { cvDataSchema, cvDataToText, emptyCvData, extractContacts, extractLinks, maskText, stripNul, type CvData } from "./cvData";
+import { deriveUserCode, fetchAdminOverview, isMissingAdminColumn, listAdminUsers, MIGRATION_007 } from "./admin";
+import { buildChatInput, chatRequestSchema } from "./chat";
+import { analyzeCVvsJD, chatReply, evaluateInterviewAnswer, generateCvQualityFeedback, generateMockQuestions, rewriteSection, rewriteSectionSchema, structureCV } from "./aiService";
+import { cvDataSchema, cvDataToText, imageDataUrlSchema, emptyCvData, extractContacts, extractLinks, maskText, stripNul, type CvData } from "./cvData";
 import { inspectCvQuality, scoreQualityIssues } from "./cvQuality";
 import { requireAuth, type AuthenticatedRequest } from "./auth";
 import { config } from "./config";
@@ -119,6 +121,18 @@ function isMissingUserColumn(error: { message?: string } | null): boolean {
   return Boolean(error?.message && /is_admin|phone|user_code/i.test(error.message));
 }
 
+const MIGRATION_009 = "009_user_avatar.sql";
+
+/** The picture is optional: without migration 009 the profile simply has none. */
+async function loadAvatar(id: string): Promise<string | null> {
+  const { data, error } = await supabase.from("users").select("avatar").eq("id", id).maybeSingle();
+  if (error) {
+    if (!/avatar/i.test(error.message)) console.warn(`Profile loaded without a picture: ${error.message}`);
+    return null;
+  }
+  return (data?.avatar as string | null | undefined) ?? null;
+}
+
 async function loadUserProfile(id: string) {
   type UserRow = {
     id: string;
@@ -164,6 +178,7 @@ async function loadUserProfile(id: string) {
     credits: row.credits,
     is_admin: Boolean(row.is_admin),
     created_at: row.created_at,
+    avatar: await loadAvatar(row.id),
     payments_enabled: paymentsEnabled
   };
 }
@@ -197,38 +212,28 @@ router.put("/user/me", requireAuth, async (req: AuthenticatedRequest, res) => {
     }
 
     const current = await loadUserProfile(id);
-    const nextEmail = body.email ?? current.email.toLowerCase();
-    const emailChanged = nextEmail !== current.email.toLowerCase();
-
-    if (emailChanged) {
-      const { data: existing } = await supabase
-        .from("users")
-        .select("id")
-        .ilike("email", nextEmail)
-        .neq("id", id)
-        .maybeSingle();
-      if (existing) {
-        throw new HttpError(409, "Địa chỉ email này đã được sử dụng bởi một tài khoản khác.");
-      }
+    // Changing the login email needs codes sent to the old and new address, which the profile page
+    // does through Supabase Auth. Changing it here would skip that proof of ownership.
+    if (body.email && body.email !== current.email.toLowerCase()) {
+      throw new HttpError(400, "Đổi email cần xác nhận bằng mã gửi tới email. Hãy dùng mục Đổi email trong trang Hồ sơ.");
     }
 
     const authUser = await supabase.auth.admin.getUserById(id).catch(() => null);
     const existingMeta = (authUser?.data?.user?.user_metadata ?? {}) as Record<string, unknown>;
     const { error: authUpdateError } = await supabase.auth.admin.updateUserById(id, {
-      ...(emailChanged ? { email: nextEmail, email_confirm: true } : {}),
       user_metadata: { ...existingMeta, full_name: body.full_name, phone: normalizedPhone }
     });
     if (authUpdateError) throw new HttpError(400, authUpdateError.message);
 
     let updateRes = await supabase
       .from("users")
-      .update({ full_name: body.full_name, phone: normalizedPhone, email: nextEmail })
+      .update({ full_name: body.full_name, phone: normalizedPhone })
       .eq("id", id);
 
     if (updateRes.error && /phone/i.test(updateRes.error.message)) {
       updateRes = await supabase
         .from("users")
-        .update({ full_name: body.full_name, email: nextEmail })
+        .update({ full_name: body.full_name })
         .eq("id", id);
     }
     if (updateRes.error) throw updateRes.error;
@@ -237,6 +242,20 @@ router.put("/user/me", requireAuth, async (req: AuthenticatedRequest, res) => {
       user: await loadUserProfile(id),
       message: "Đã cập nhật thông tin hồ sơ thành công."
     });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.put("/user/avatar", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const body = parseBody(z.object({ avatar: imageDataUrlSchema.or(z.literal("")) }), req.body);
+    const { error } = await supabase.from("users").update({ avatar: body.avatar || null }).eq("id", userId(req));
+    if (error && /avatar/i.test(error.message)) {
+      throw new HttpError(503, `Ảnh đại diện cần chạy migration ${MIGRATION_009} trước.`);
+    }
+    if (error) throw error;
+    res.json({ user: await loadUserProfile(userId(req)) });
   } catch (error) {
     sendError(res, error);
   }
@@ -267,10 +286,24 @@ router.put("/user/password", requireAuth, async (req: AuthenticatedRequest, res)
   }
 });
 
-router.get("/admin/overview", requireAuth, async (req: AuthenticatedRequest, res) => {
+/** Copies the login email into public.users after a confirmed change; migration 008 does the same in the database. */
+router.post("/user/email/sync", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const id = userId(req);
-    const { data, error } = await supabase.from("users").select("id,is_admin").eq("id", id).maybeSingle();
+    const { data, error } = await supabase.auth.admin.getUserById(id);
+    if (error || !data.user?.email) throw new HttpError(502, "Không đọc được email đăng nhập.");
+    const { error: updateError } = await supabase.from("users").update({ email: data.user.email }).eq("id", id);
+    if (updateError) throw updateError;
+    res.json({ user: await loadUserProfile(id) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Reads the flag from the database on every request, so a revoked admin loses access at once. */
+async function requireAdmin(req: AuthenticatedRequest, _res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { data, error } = await supabase.from("users").select("is_admin").eq("id", userId(req)).maybeSingle();
     if (isMissingAdminColumn(error)) {
       throw new HttpError(503, `Chức năng quản trị chưa sẵn sàng. Hãy chạy migration ${MIGRATION_007} trước.`);
     }
@@ -278,7 +311,30 @@ router.get("/admin/overview", requireAuth, async (req: AuthenticatedRequest, res
     if (!data?.is_admin) {
       throw new HttpError(403, "Chỉ tài khoản quản trị (Admin) mới có quyền truy cập trang thống kê này.");
     }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+router.get("/admin/overview", requireAuth, requireAdmin, async (_req, res) => {
+  try {
     res.json({ overview: await fetchAdminOverview() });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+const adminUserListSchema = z.object({
+  q: z.string().trim().max(100).optional(),
+  page: z.coerce.number().int().min(1).max(1000).default(1)
+});
+
+router.get("/admin/users", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const parsed = adminUserListSchema.safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, "Invalid user filters");
+    res.json(await listAdminUsers(parsed.data.q, parsed.data.page));
   } catch (error) {
     sendError(res, error);
   }
@@ -1243,6 +1299,30 @@ router.post("/interviews/:sessionId/answers/:index/follow-up", requireAuth, asyn
     if (!saved) throw new HttpError(409, "Câu trả lời chính vừa thay đổi. Hãy tải lại trang rồi trả lời câu hỏi nối tiếp mới.");
     res.json({ follow_up: followUp });
   } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Every typed question spends AI quota, so the chat has a tighter limit than the rest of the API.
+const chatLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 15,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthenticatedRequest).userId ?? req.ip ?? "",
+  message: { error: "Bạn gửi tin nhắn hơi nhanh. Vui lòng chờ một phút rồi thử lại." }
+});
+
+router.post("/chat", requireAuth, chatLimit, async (req: AuthenticatedRequest, res) => {
+  try {
+    const body = parseBody(chatRequestSchema, req.body);
+    res.json({ reply: await chatReply(buildChatInput(body.messages, body.page)) });
+  } catch (error) {
+    // The chat box offers its common questions instead, so users need no detail about the outage.
+    if (error instanceof HttpError && error.status === 503) {
+      sendError(res, new HttpError(503, "Hỗ trợ AI tạm thời chưa khả dụng. Bạn có thể chọn một câu hỏi thường gặp bên dưới."));
+      return;
+    }
     sendError(res, error);
   }
 });

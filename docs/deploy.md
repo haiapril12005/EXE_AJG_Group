@@ -19,7 +19,7 @@ Không dùng Vercel: Vercel chạy code dạng serverless, giới hạn body m�
    npm.cmd run build
    ```
 3. Không commit `backend/.env` hay `frontend/.env.local`. Các giá trị trong đó được nhập vào dashboard của Render.
-4. Supabase đã chạy đủ migration `001` → `006` (`npm.cmd run db:check` báo đạt).
+4. Supabase đã chạy đủ migration `001` → `009` (`npm.cmd run db:check` báo đạt).
 
 ## 1. Tạo Web Service trên Render
 
@@ -63,7 +63,7 @@ Biến `NEXT_PUBLIC_*` được gắn vào code website lúc build. Sau khi sử
 
 1. Trên Render, sửa `WEB_ORIGIN` thành địa chỉ Render, ví dụ `https://job-ready.onrender.com` (không có `/` cuối). Render tự khởi động lại.
 2. Trên Supabase, **Authentication → URL Configuration**: đặt **Site URL** là địa chỉ Render; thêm cùng địa chỉ đó vào **Redirect URLs** (giữ `http://localhost:3000` để còn chạy local).
-3. Kiểm tra mẫu thư **Confirm sign up** và **Reset password** đã dùng `{{ .Token }}` và Custom SMTP đang bật, theo [email-otp.md](email-otp.md).
+3. Kiểm tra mẫu thư **Confirm sign up**, **Reset password** và **Change email address** đã dùng `{{ .Token }}` và Custom SMTP đang bật, theo [email-otp.md](email-otp.md).
 
 ## 3. Thử trên bản deploy
 
@@ -87,4 +87,4 @@ Gói Free tạm dừng dịch vụ sau 15 phút không có truy cập; lần m�
 
 ## 4. Tiện ích trình duyệt
 
-`extension/` đang gửi JD tới `http://localhost:3000`, vẫn đúng khi chạy local. Muốn dùng với bản deploy, đổi `APP_URL` trong `extension/popup.js` và `host_permissions` trong `extension/manifest.json` sang địa chỉ Render, rồi tải lại tiện ích trong `chrome://extensions`.
+`extension/` đang gửi JD tới `http://localhost:3000`, vẫn đúng khi chạy local. Muốn dùng với bản deploy, đổi `APP_URL` trong `extension/popup.js` sang địa chỉ Render (giữ đường dẫn `/analyze`) và `host_permissions` trong `extension/manifest.json` sang địa chỉ đó, rồi tải lại tiện ích trong `chrome://extensions`.

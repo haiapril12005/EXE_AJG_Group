@@ -8,6 +8,7 @@ import type { Session } from "@supabase/supabase-js";
 import { api } from "../utils/api";
 import { createClient } from "../utils/supabase/client";
 import { AuthScreen } from "./auth-screen";
+import { ChatBox, clearChat } from "./chat-box";
 
 const supabase = createClient();
 
@@ -17,6 +18,7 @@ export type Profile = {
   email: string;
   full_name: string;
   phone?: string;
+  avatar?: string | null;
   credits: number;
   is_admin?: boolean;
   created_at?: string;
@@ -47,9 +49,10 @@ export function formatUserCode(id: string): string {
   return String(10_000_000 + (seed % 90_000_000));
 }
 
+// The job list is the home page, so it comes first; the analysis form lives at /analyze.
 const NAV_ITEMS = [
-  { href: "/", label: "Phân tích" },
   { href: "/jobs", label: "Việc làm" },
+  { href: "/analyze", label: "Phân tích" },
   { href: "/create", label: "Tạo CV" },
   { href: "/history", label: "Lịch sử" }
 ];
@@ -58,7 +61,7 @@ const WIDE_ROUTES = /^\/(?:create|cv|analysis)(?:\/|$)/;
 
 function Brand() {
   return (
-    <Link href="/" className="brand">
+    <Link href="/jobs" className="brand">
       <span className="brand-mark" aria-hidden="true">♧</span>
       <span><strong>JOB <em>READY</em></strong><small>DỰ ÁN EXE101 · NHÓM 81</small></span>
     </Link>
@@ -171,6 +174,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
 
   async function signOut() {
     setAccountOpen(false);
+    if (userId) clearChat(userId);
     const { error } = await supabase.auth.signOut();
     if (error) setNotice(`Không thể đăng xuất: ${error.message}`);
   }
@@ -191,7 +195,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
             <Brand />
             <nav className="app-nav" aria-label="Điều hướng chính">
               {[...NAV_ITEMS, ...(profile?.is_admin ? [{ href: "/admin", label: "Quản trị" }] : [])].map((item) => {
-                const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+                const active = pathname.startsWith(item.href);
                 return <Link key={item.href} href={item.href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}>{item.label}</Link>;
               })}
             </nav>
@@ -208,7 +212,9 @@ export function AppFrame({ children }: { children: ReactNode }) {
                   aria-haspopup="menu"
                   onClick={() => setAccountOpen((open) => !open)}
                 >
-                  <span className="avatar">{displayName.trim().charAt(0).toUpperCase()}</span>
+                  {profile?.avatar
+                    ? <img className="avatar avatar-photo" src={profile.avatar} alt="" />
+                    : <span className="avatar">{displayName.trim().charAt(0).toUpperCase()}</span>}
                   <span className="profile-meta">
                     <span className="profile-name-line">
                       <span className="profile-name">{displayName}</span>
@@ -273,6 +279,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
           {children}
           <footer className="site-footer no-print"><span>Job Ready · Phân tích có trách nhiệm, không bịa đặt thông tin hồ sơ.</span><span>{profile ? (profile.payments_enabled ? `Còn lại ${profile.credits} credits` : "Dùng thử miễn phí") : ""}</span></footer>
         </div>
+        <ChatBox />
       </main>
     </AppContext.Provider>
   );

@@ -33,6 +33,16 @@ Màn hình **Quên mật khẩu** gửi mã qua `resetPasswordForEmail`, rồi n
 
 Thư đặt lại mật khẩu dùng chung SMTP và hạn mức với thư xác nhận đăng ký ở mục 3. Supabase trả thành công cả khi email chưa có tài khoản để không lộ danh sách người dùng, nên ứng dụng chỉ báo "nếu email đã có tài khoản, mã đã được gửi".
 
+## 2c. Đổi mẫu thư Change email address (đổi email)
+
+Trang **Hồ sơ cá nhân** cho phép đổi email: người dùng nhập email mới và mật khẩu, rồi nhập mã xác nhận. Mẫu mặc định của Supabase chỉ có link, nên cần đổi để thư có mã:
+
+1. Trong **Authentication → Email → Templates**, chọn **Change email address**.
+2. Đặt subject: `Mã xác nhận đổi email Job Ready`.
+3. Copy toàn bộ [supabase/templates/change-email.html](../supabase/templates/change-email.html) vào phần nội dung HTML rồi **Save**.
+
+Theo mặc định, Supabase bật **Secure email change**: cả email cũ và email mới đều nhận thư, mỗi thư một mã, và email chỉ đổi sau khi cả hai mã được xác nhận. Nếu tắt thiết lập này, chỉ email mới cần xác nhận; ô mã của email hiện tại khi đó để trống. Nếu chưa đổi mẫu thư, người dùng vẫn có thể bấm nút trong từng thư rồi tải lại trang Hồ sơ. Cột `public.users.email` được trigger trong migration 008 cập nhật theo. API `PUT /api/user/me` không còn đổi email trực tiếp. Số điện thoại trong hồ sơ chỉ để lưu thông tin, không được xác minh bằng SMS.
+
 ## 3. Cấu hình SMTP để gửi tới email người dùng thử
 
 SMTP mặc định của Supabase chỉ gửi tới email của thành viên trong organization và hiện giới hạn **2 thư/giờ cho cả project**. Email người dùng ứng dụng không tự trở thành email được phép nhận. Vì vậy, email nhập đúng vẫn có thể bị từ chối gửi.

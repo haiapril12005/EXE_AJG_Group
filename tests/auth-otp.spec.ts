@@ -118,7 +118,7 @@ async function mockServices(context: BrowserContext, options: AuthMocks = {}) {
       switch (url.pathname) {
         case "/api/user/me":
           return reply(route, { status: 200, body: { user: {
-            id: USER_ID, email: EMAIL, full_name: "OTP Demo", credits: 0, payments_enabled: false,
+            id: USER_ID, email: EMAIL, full_name: "OTP Demo", credits: 0, is_admin: false, payments_enabled: false,
           } } });
         case "/api/cv":
           return reply(route, { status: 200, body: { cvs: [] } });

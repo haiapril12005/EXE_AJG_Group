@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api } from "../../utils/api";
 import { formatUserCode, useApp } from "../app-frame";
 
@@ -72,8 +72,9 @@ type AdminOverview = {
     last_seen_at: string | null;
   };
   admins: AdminUserSummary[];
-  recent_users?: AdminUserRow[];
 };
+
+type UserPage = { users: AdminUserRow[]; total: number; page: number; page_size: number };
 
 const shortDateTime = (value: string) =>
   new Date(value).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" });
@@ -89,7 +90,15 @@ export default function AdminPage() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [userSearch, setUserSearch] = useState("");
+  // The user list is searched and paged by the server, so every account can be found, not only recent ones.
+  const [users, setUsers] = useState<UserPage | null>(null);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
+  const [query, setQuery] = useState("");
+  const [userPage, setUserPage] = useState(1);
+  const [usersVersion, setUsersVersion] = useState(0);
+  const canListUsers = overview !== null;
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
@@ -109,6 +118,39 @@ export default function AdminPage() {
     void loadOverview();
   }, [loadOverview]);
 
+  useEffect(() => {
+    // The overview proves admin access first; a refused overview needs no second refused request.
+    if (!canListUsers) return;
+    let active = true;
+    setUsersLoading(true);
+    setUsersError("");
+    const params = new URLSearchParams({ page: String(userPage) });
+    if (query) params.set("q", query);
+    void api<UserPage>(`/admin/users?${params}`, token).then((result) => {
+      if (active) setUsers(result);
+    }).catch((err: Error) => {
+      if (active) setUsersError(err.message);
+    }).finally(() => {
+      if (active) setUsersLoading(false);
+    });
+    return () => { active = false; };
+    // A refreshed token does not change the list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canListUsers, query, userPage, usersVersion]);
+
+  function searchUsers(event: FormEvent) {
+    event.preventDefault();
+    setUserPage(1);
+    setQuery(searchDraft.trim());
+  }
+
+  function refreshAll() {
+    void loadOverview();
+    setUsersVersion((version) => version + 1);
+  }
+
+  const lastUserPage = users ? Math.max(1, Math.ceil(users.total / users.page_size)) : 1;
+
   return (
     <>
       <section className="page-heading admin-heading">
@@ -118,7 +160,7 @@ export default function AdminPage() {
           <p>Theo dõi người dùng, hồ sơ CV, lượt phân tích AI, phiên phỏng vấn và doanh thu PayOS.</p>
         </div>
         {overview && (
-          <button type="button" className="secondary-button admin-refresh" disabled={loading} onClick={() => void loadOverview()}>
+          <button type="button" className="secondary-button admin-refresh" disabled={loading} onClick={refreshAll}>
             {loading ? "Đang cập nhật..." : "↻ Làm mới số liệu"}
           </button>
         )}
@@ -130,7 +172,7 @@ export default function AdminPage() {
           <p className="muted-copy">
             Quyền quản trị chỉ được cấp qua lệnh CLI với khóa bí mật máy chủ cho tài khoản đã xác thực email (OTP) và giới hạn tối đa 3 tài khoản Admin.
           </p>
-          <Link href="/" className="inline-link">← Về trang phân tích</Link>
+          <Link href="/analyze" className="inline-link">← Về trang phân tích</Link>
         </section>
       )}
 
@@ -237,51 +279,54 @@ export default function AdminPage() {
               </div>
             </section>
 
-            {overview.recent_users && overview.recent_users.length > 0 && (
-              <section className="soft-card admin-span-full">
-                <div className="admin-users-header">
-                  <h3>Danh sách người dùng hệ thống ({overview.users.total})</h3>
+            <section className="soft-card admin-span-full" aria-label="Danh sách người dùng">
+              <div className="admin-users-header">
+                <h3>
+                  {query ? `Kết quả tìm “${query}”` : "Danh sách người dùng hệ thống"} ({(users?.total ?? (query ? 0 : overview.users.total)).toLocaleString("vi-VN")})
+                </h3>
+                <form className="admin-user-search-form" role="search" onSubmit={searchUsers}>
                   <input
                     type="search"
                     className="form-input admin-user-search"
+                    aria-label="Tìm người dùng"
                     placeholder="Tìm theo mã ID (8 số), email hoặc họ tên..."
-                    value={userSearch}
-                    onChange={(event) => setUserSearch(event.target.value)}
+                    maxLength={100}
+                    value={searchDraft}
+                    onChange={(event) => setSearchDraft(event.target.value)}
                   />
-                </div>
-                <div className="admin-list">
-                  {overview.recent_users
-                    .filter((user) => {
-                      const q = userSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      const code = user.user_code || formatUserCode(user.id);
-                      return (
-                        code.includes(q) ||
-                        user.email.toLowerCase().includes(q) ||
-                        (user.full_name || "").toLowerCase().includes(q)
-                      );
-                    })
-                    .map((user) => {
-                      const code = user.user_code || formatUserCode(user.id);
-                      return (
-                        <div key={user.id} className="history-item admin-tx-item">
-                          <div>
-                            <strong>
-                              <code className="profile-id-code">ID: {code}</code> · {user.full_name || "Chưa đặt tên"} · <span className="muted-copy">{user.email}</span>
-                            </strong>
-                            <small className="admin-subline">
-                              Credits: {user.credits} · Tạo ngày {new Date(user.created_at).toLocaleDateString("vi-VN")}
-                            </small>
-                          </div>
-                          <span className={`admin-badge ${user.is_admin ? "admin-badge-success" : "admin-badge-neutral"}`}>
-                            {user.is_admin ? "ADMIN" : "USER"}
-                          </span>
-                        </div>
-                      );
-                    })}
-                </div>
-              </section>
-            )}
+                  <button type="submit" className="secondary-button admin-search-button" disabled={usersLoading}>Tìm</button>
+                </form>
+              </div>
+              {usersError && <p role="status" className="notice notice-info">{usersError}</p>}
+              {usersLoading && !users && <p className="muted-copy">Đang tải danh sách người dùng...</p>}
+              {users && users.users.length === 0 && (
+                <p className="empty-copy">{query ? `Không tìm thấy người dùng khớp “${query}”.` : "Chưa có người dùng nào."}</p>
+              )}
+              <div className="admin-list" aria-busy={usersLoading}>
+                {users?.users.map((user) => (
+                  <div key={user.id} className="history-item admin-tx-item">
+                    <div>
+                      <strong>
+                        <code className="profile-id-code">ID: {user.user_code || formatUserCode(user.id)}</code> · {user.full_name || "Chưa đặt tên"} · <span className="muted-copy">{user.email}</span>
+                      </strong>
+                      <small className="admin-subline">
+                        Credits: {user.credits} · Tạo ngày {new Date(user.created_at).toLocaleDateString("vi-VN")}
+                      </small>
+                    </div>
+                    <span className={`admin-badge ${user.is_admin ? "admin-badge-success" : "admin-badge-neutral"}`}>
+                      {user.is_admin ? "ADMIN" : "USER"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {users && lastUserPage > 1 && (
+                <nav className="job-pager" aria-label="Phân trang người dùng">
+                  <button type="button" className="secondary-button" disabled={userPage <= 1 || usersLoading} onClick={() => setUserPage(userPage - 1)}>← Trước</button>
+                  <span>Trang {userPage}/{lastUserPage}</span>
+                  <button type="button" className="secondary-button" disabled={userPage >= lastUserPage || usersLoading} onClick={() => setUserPage(userPage + 1)}>Sau →</button>
+                </nav>
+              )}
+            </section>
           </div>
         </>
       )}
