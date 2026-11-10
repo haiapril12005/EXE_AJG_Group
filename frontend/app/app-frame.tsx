@@ -83,6 +83,7 @@ export function AppFrame({ children }: { children: ReactNode }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  const pendingLoginRedirectRef = useRef(false);
   const token = session?.access_token ?? "";
   const userId = session?.user.id;
 
@@ -137,24 +138,30 @@ export function AppFrame({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshProfile = useCallback(async () => {
+    let loaded: Profile | null = null;
     try {
       const result = await api<{ user: Profile }>("/user/me", token);
       if (result.user.is_admin === undefined && userId) {
         const { data } = await supabase.from("users").select("is_admin").eq("id", userId).maybeSingle();
         result.user.is_admin = Boolean(data?.is_admin);
       }
-      setProfile(result.user);
+      loaded = result.user;
+      setProfile(loaded);
     } catch (error) {
       if (userId) {
         const { data } = await supabase.from("users").select("id,email,full_name,credits,is_admin").eq("id", userId).maybeSingle();
         if (data) {
-          setProfile({ ...data, is_admin: Boolean(data.is_admin), payments_enabled: false });
-          return;
+          loaded = { ...data, is_admin: Boolean(data.is_admin), payments_enabled: false };
+          setProfile(loaded);
         }
       }
-      throw error;
+      if (!loaded) throw error;
     }
-  }, [token, userId]);
+    if (loaded && pendingLoginRedirectRef.current) {
+      pendingLoginRedirectRef.current = false;
+      router.replace(loaded.is_admin ? "/admin" : "/jobs");
+    }
+  }, [router, token, userId]);
 
   useEffect(() => {
     if (userId) void refreshProfile().catch((error: Error) => setNotice(error.message));
@@ -162,10 +169,13 @@ export function AppFrame({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Signing in from the home page opens the job list. A link to a specific page (a shared report,
-  // an interview) stays on that page after sign-in.
+  // Signing in from the home page opens /admin for administrators and /jobs for regular users.
+  // A link to a specific page (a shared report, an interview) stays on that page after sign-in.
   function signedIn(next: Session) {
-    if (pathname === "/") router.replace("/jobs");
+    if (pathname === "/") {
+      pendingLoginRedirectRef.current = true;
+      router.replace("/jobs");
+    }
     setSession(next);
   }
 
@@ -236,9 +246,6 @@ export function AppFrame({ children }: { children: ReactNode }) {
                     <div className="account-dropdown-links" onClick={() => setAccountOpen(false)}>
                       <Link href="/profile" role="menuitem" className="account-menu-item">
                         <strong>Hồ sơ cá nhân</strong>
-                      </Link>
-                      <Link href="/jobs?saved=1" role="menuitem" className="account-menu-item">
-                        <strong>Việc làm xem sau</strong>
                       </Link>
                       <Link href="/history" role="menuitem" className="account-menu-item">
                         <strong>Lịch sử hoạt động</strong>

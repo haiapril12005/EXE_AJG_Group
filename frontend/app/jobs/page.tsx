@@ -139,7 +139,7 @@ export default function JobsPage() {
           className={`job-tab ${onlySaved ? "is-active" : ""}`}
           onClick={() => switchTab(true)}
         >
-          ★ Xem sau · Đã lưu ({savedIds.length})
+          ★ Xem sau ({savedIds.length})
         </button>
       </div>
 
