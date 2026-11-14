@@ -83,6 +83,7 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   weak_password: "Mật khẩu chưa đủ mạnh. Hãy dùng ít nhất 8 ký tự và kết hợp chữ, số, ký tự đặc biệt.",
   email_address_invalid: "Địa chỉ email không hợp lệ. Vui lòng kiểm tra lại.",
   same_password: "Mật khẩu mới phải khác mật khẩu cũ.",
+  email_exists: "Email này đã được dùng cho một tài khoản khác.",
   unexpected_failure: "Hệ thống chưa xử lý được yêu cầu. Vui lòng thử lại sau.",
 };
 

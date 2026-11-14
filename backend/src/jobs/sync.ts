@@ -1,4 +1,5 @@
 import { supabase } from "../supabase";
+import { categorizeJob } from "./categories";
 import { fetchJobSource, JOB_SOURCES, type JobSource } from "./connectors";
 import { planMissedScans } from "./normalize";
 
@@ -6,7 +7,7 @@ async function storeSource(source: JobSource, jobs: Awaited<ReturnType<typeof fe
   const seenAt = new Date().toISOString();
   if (jobs.jobs.length) {
     const { error } = await supabase.from("job_postings").upsert(
-      jobs.jobs.map((job) => ({ ...job, last_seen_at: seenAt, missed_scans: 0, is_active: true })),
+      jobs.jobs.map((job) => ({ ...job, category: categorizeJob(job.title), last_seen_at: seenAt, missed_scans: 0, is_active: true })),
       { onConflict: "source,source_key,external_id" }
     );
     if (error) throw error;
@@ -42,6 +43,8 @@ function describeSyncError(error: unknown): string {
   const { code, message } = (error ?? {}) as { code?: string; message?: string };
   // 23514: the source check constraint predates this source type.
   if (code === "23514") return "the database does not accept this source yet; run supabase/migrations/006_job_sources_lever_ashby.sql";
+  // PGRST204: the category column is not in the database yet.
+  if (code === "PGRST204" && /category/.test(message ?? "")) return "the database has no job category column yet; run supabase/migrations/010_job_categories.sql";
   return message ?? String(error);
 }
 

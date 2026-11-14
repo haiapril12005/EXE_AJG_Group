@@ -48,7 +48,8 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "")
+/** Lowercase, without Vietnamese diacritics, so matching works with or without accents. */
+export const plain = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "")
   .replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase();
 
 export function isVietnamLocation(location: string): boolean {

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap");
 @import "tailwindcss";
 
 :root {
@@ -21,7 +21,8 @@ html {
 body {
   min-height: 100vh;
   margin: 0;
-  font-family: "Nunito", Arial, Helvetica, sans-serif;
+  /* Segoe UI before Arial: it keeps bold Vietnamese intact when Nunito cannot load. */
+  font-family: "Nunito", "Segoe UI", Arial, Helvetica, sans-serif;
 }
 
 button,
@@ -61,16 +62,21 @@ button:disabled {
 
 .app-shell.theme-dark {
   color-scheme: dark;
-  --page: #0f172a;
-  --surface: #1e293b;
-  --surface-soft: #263449;
-  --surface-muted: #172337;
-  --ink: #e2e8f0;
-  --heading: #f8fafc;
-  --muted: #94a3b8;
-  --subtle: #64748b;
-  --line: #334155;
-  --soft-shadow: 0 10px 40px -10px rgba(0, 0, 0, .3);
+  --page: #000000;
+  --surface: #121212;
+  --surface-soft: #1f1f1f;
+  --surface-muted: #0a0a0a;
+  --ink: #e5e5e5;
+  --heading: #fafafa;
+  --muted: #a3a3a3;
+  --subtle: #737373;
+  --line: #2a2a2a;
+  --soft-shadow: 0 10px 40px -10px rgba(0, 0, 0, .6);
+}
+
+/* What shows behind the app (overscroll, a short page) turns black with it. */
+body:has(> main.app-shell.theme-dark) {
+  background: #000000;
 }
 
 .site-header {
@@ -350,7 +356,7 @@ button:disabled {
 }
 
 .theme-dark .drop-area {
-  border-color: #475569;
+  border-color: #404040;
 }
 
 .drop-area:hover,

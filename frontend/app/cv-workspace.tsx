@@ -8,7 +8,7 @@ import { loadDraft } from "../utils/draft";
 import { AnalysisReport, QualityCard, type Analysis, type QualityEvaluation } from "./analysis-report";
 import { useApp } from "./app-frame";
 import { useBilling } from "./billing";
-import { CV_TEMPLATES, CvPaper, type CvData, type CvTemplateId, type RewriteSection } from "./cv-editor";
+import { CV_TEMPLATES, CvPaper, TEMPLATE_CATEGORIES, type CvData, type CvTemplateId, type RewriteSection } from "./cv-editor";
 
 type SavedAnalysis = Analysis & { cv_id: string; jd_text: string; job_id?: string | null };
 type UndoEntry = { section: RewriteSection; index: number; previous: string };
@@ -294,14 +294,14 @@ export function CvWorkspace({ cvId: routeCvId, analysisId, evaluationId }: { cvI
   }
 
   if (loading) return <p className="muted-copy">Đang chuẩn bị CV...</p>;
-  if (!cvData) return <><p role="status" className="notice notice-info">{notice}</p><Link href="/" className="text-button">← Về trang chính</Link></>;
+  if (!cvData) return <><p role="status" className="notice notice-info">{notice}</p><Link href="/analyze" className="text-button">← Về trang phân tích</Link></>;
 
   const working = busy || rewriting !== null;
   return (
     <div className="split-layout">
       <div className="split-left no-print">
         <div className="workspace-toolbar">
-          <Link href="/" className="text-button">← Về trang chính</Link>
+          <Link href="/analyze" className="text-button">← Về trang phân tích</Link>
           <div className="toolbar-actions">
             <button type="button" className="secondary-button" disabled={working} onClick={() => void evaluateCv()}>◎ Đánh giá CV</button>
             <button type="button" className="secondary-button" disabled={working || !analysis} onClick={() => void optimizeAll()}>✨ Tối ưu toàn bộ CV</button>
@@ -330,7 +330,10 @@ export function CvWorkspace({ cvId: routeCvId, analysisId, evaluationId }: { cvI
           <span className={`save-state save-${saveState}`}>{saveState === "saved" ? "✓ Đã lưu" : saveState === "saving" ? "Đang lưu..." : saveState === "error" ? "Lỗi lưu · sẽ thử lại" : "Chưa lưu..."}</span>
           <label className="template-select">Mẫu
             <select className="form-input" value={cvData.template} onChange={(event) => changeCv({ ...cvData, template: event.target.value as CvTemplateId })}>
-              {CV_TEMPLATES.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              {TEMPLATE_CATEGORIES.map((group) => <optgroup key={group.id} label={group.label}>
+                {CV_TEMPLATES.filter((template) => template.category === group.id).map((template) =>
+                  <option key={template.id} value={template.id}>{template.name} · {template.columns} cột</option>)}
+              </optgroup>)}
             </select>
           </label>
           <button type="button" className="secondary-button" onClick={exportPdf}>⬇ Xuất PDF</button>

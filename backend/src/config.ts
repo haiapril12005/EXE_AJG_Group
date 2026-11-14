@@ -30,6 +30,10 @@ const environmentSchema = z.object({
   GEMINI_STT_MODEL: z.string().default("gemini-3.5-transcribe"),
   GEMINI_TTS_MODEL: z.string().default("gemini-3.8-flash-lite-tts"),
   GEMINI_TTS_VOICE: z.string().default("Kore"),
+  // AI cost estimate on the admin page: USD per 1 million tokens (thinking tokens bill as output).
+  AI_PRICE_INPUT_USD_PER_M: z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().min(0).default(0.5)),
+  AI_PRICE_OUTPUT_USD_PER_M: z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().min(0).default(3)),
+  USD_VND_RATE: z.preprocess((value) => value === "" ? undefined : value, z.coerce.number().positive().default(26000)),
   // 0 turns automatic job sync off; `npm run jobs:sync` still works.
   JOB_SYNC_INTERVAL_HOURS: z.preprocess(
     (value) => value === "" ? undefined : value,

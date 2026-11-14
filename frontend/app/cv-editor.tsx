@@ -1,14 +1,36 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { imageFileToDataUrl, PHOTO_SIZE } from "../utils/image";
 
+export const TEMPLATE_CATEGORIES = [
+  { id: "professional", label: "Chuyên nghiệp" },
+  { id: "modern", label: "Hiện đại" },
+  { id: "creative", label: "Sáng tạo" },
+  { id: "basic", label: "Cơ bản" }
+] as const;
+
+export type TemplateCategory = (typeof TEMPLATE_CATEGORIES)[number]["id"];
+
+/** `columns` tells the user which layouts suit a short CV (1) and which suit a long one (2). */
 export const CV_TEMPLATES = [
-  { id: "modern", name: "Modern", description: "Xanh ngọc, cân bằng, phù hợp đa ngành." },
-  { id: "classic", name: "Classic", description: "Trang trọng, serif, hợp tài chính và quản lý." },
-  { id: "minimal", name: "Minimal", description: "Tối giản, đơn sắc, tập trung vào nội dung." },
-  { id: "creative", name: "Creative", description: "Bố cục nổi bật, thanh bên màu tím." },
-  { id: "executive", name: "Executive", description: "Xanh navy chuyên nghiệp cho vị trí senior." },
-  { id: "compact", name: "Compact", description: "Gọn gàng, tận dụng trang cho hồ sơ nhiều mục." }
+  { id: "modern", name: "Modern", category: "modern", columns: 1, description: "Xanh ngọc, cân bằng, phù hợp đa ngành." },
+  { id: "classic", name: "Classic", category: "professional", columns: 1, description: "Trang trọng, serif, hợp tài chính và quản lý." },
+  { id: "minimal", name: "Minimal", category: "basic", columns: 1, description: "Tối giản, đơn sắc, tập trung vào nội dung." },
+  { id: "creative", name: "Creative", category: "creative", columns: 2, description: "Bố cục nổi bật, thanh bên màu tím." },
+  { id: "executive", name: "Executive", category: "professional", columns: 1, description: "Xanh navy chuyên nghiệp cho vị trí senior." },
+  { id: "compact", name: "Compact", category: "modern", columns: 1, description: "Gọn gàng, tận dụng trang cho hồ sơ nhiều mục." },
+  { id: "elegant", name: "Elegant", category: "professional", columns: 1, description: "Serif tinh tế, điểm nhấn vàng champagne, hợp luật, khách sạn, sự kiện." },
+  { id: "tech", name: "Tech", category: "modern", columns: 1, description: "Đầu trang tối, chữ kiểu mã nguồn, hợp lập trình viên và kỹ sư." },
+  { id: "timeline", name: "Timeline", category: "modern", columns: 1, description: "Học vấn, kinh nghiệm và dự án xếp theo dòng thời gian." },
+  { id: "bold", name: "Bold", category: "creative", columns: 1, description: "Tên lớn, điểm nhấn cam nổi bật, hợp sales và marketing." },
+  { id: "pastel", name: "Pastel", category: "creative", columns: 1, description: "Các mục dạng thẻ màu pastel, trẻ trung, hợp thiết kế và truyền thông." },
+  { id: "ats", name: "ATS", category: "basic", columns: 1, description: "Một cột, chữ đen, không khối màu, dễ đọc với phần mềm lọc CV." },
+  { id: "corporate", name: "Corporate", category: "professional", columns: 2, description: "Cột trái xanh navy chứa liên hệ và kỹ năng; hợp kế toán, ngân hàng, văn phòng." },
+  { id: "consultant", name: "Consultant", category: "professional", columns: 2, description: "Đầu trang xám nhạt, cột phải cho kỹ năng, điểm nhấn đỏ rượu vang; hợp tư vấn, quản lý." },
+  { id: "formal", name: "Formal", category: "professional", columns: 1, description: "Tên mục nằm ở lề trái, chữ có chân; trình bày chuẩn mực cho hồ sơ nhiều kinh nghiệm." },
+  { id: "monogram", name: "Monogram", category: "professional", columns: 2, description: "Chữ viết tắt tên trong vòng tròn, cột phải xanh teal; hợp giáo dục, y tế, dịch vụ." },
+  { id: "slate", name: "Slate", category: "professional", columns: 2, description: "Đầu trang xám than tràn viền, cột trái cho kỹ năng, điểm nhấn hổ phách; hợp kỹ thuật, vận hành." }
 ] as const;
 
 export type CvTemplateId = (typeof CV_TEMPLATES)[number]["id"];
@@ -24,6 +46,8 @@ export type CvData = {
   languages: { name: string; level: string }[];
   certificates: { name: string; issuer: string; year: string }[];
   links: { label: string; url: string }[];
+  /** A 3x4 portrait as an image data URL; empty or missing when the CV has none. */
+  photo?: string;
 };
 
 export type RewriteSection = "summary" | "experience" | "projects";
@@ -49,7 +73,8 @@ export const emptyCv = (name = ""): CvData => ({
   skills: [],
   languages: [],
   certificates: [],
-  links: []
+  links: [],
+  photo: ""
 });
 
 function Editable({ value, onChange, placeholder, multiline = false, className = "" }: {
@@ -109,6 +134,18 @@ export function CvPaper({ cv, onChange, highlight, rewriting, onRewrite }: {
   const removeItem = (key: CvListKey, index: number) =>
     patch({ [key]: cv[key].filter((_, i) => i !== index) } as Partial<CvData>);
   const hl = (key: string) => (highlight.includes(key) ? "ai-highlight" : "");
+  const photoInput = useRef<HTMLInputElement>(null);
+  const [photoError, setPhotoError] = useState("");
+
+  async function choosePhoto(file: File) {
+    try {
+      const photo = await imageFileToDataUrl(file, PHOTO_SIZE);
+      setPhotoError("");
+      patch({ photo });
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : "Không xử lý được ảnh.");
+    }
+  }
 
   const rewriteButton = (section: RewriteSection, index: number) => onRewrite && (
     <button type="button" className="mini-ai no-print" disabled={rewriting !== null} onClick={() => onRewrite(section, index)}>
@@ -125,9 +162,28 @@ export function CvPaper({ cv, onChange, highlight, rewriting, onRewrite }: {
     </span>
   );
 
+  // Initials for templates that show a monogram, e.g. "Nguyễn Minh Anh" becomes "NA".
+  const names = cv.personal_info.name.trim().split(/\s+/u).filter(Boolean);
+  const initials = names.length ? `${names[0][0]}${names.length > 1 ? names[names.length - 1][0] : ""}`.toUpperCase() : "";
+
   return (
     <article className={`cv-paper cv-template-${cv.template || "modern"}`} aria-label={`Bản xem trước CV - ${cv.template || "modern"}`}>
       <header className="cv-head">
+        {cv.photo ? <span className="cv-photo-frame">
+          <img className="cv-photo" src={cv.photo} alt="Ảnh 3x4" />
+          <span className="cv-photo-actions no-print">
+            <button type="button" aria-label="Đổi ảnh 3x4" onClick={() => photoInput.current?.click()}>Đổi</button>
+            <button type="button" aria-label="Xóa ảnh 3x4" onClick={() => { setPhotoError(""); patch({ photo: "" }); }}>Xóa</button>
+          </span>
+        </span> : <button type="button" className="mini-add cv-photo-add no-print" onClick={() => photoInput.current?.click()}>＋ Ảnh 3x4</button>}
+        <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp" className="visually-hidden no-print" tabIndex={-1}
+          aria-label="Chọn ảnh 3x4 cho CV" onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void choosePhoto(file);
+          }} />
+        {photoError && <span role="alert" className="cv-photo-error no-print">{photoError}</span>}
+        {initials && <span className="cv-initials" aria-hidden="true">{initials}</span>}
         <h1><Editable value={cv.personal_info.name} placeholder="Họ và tên" onChange={(name) => patch({ personal_info: { ...cv.personal_info, name } })} /></h1>
         <p className="cv-title"><Editable value={cv.personal_info.title} placeholder="Vị trí ứng tuyển" onChange={(title) => patch({ personal_info: { ...cv.personal_info, title } })} /></p>
         <p className="cv-contact">
@@ -137,12 +193,15 @@ export function CvPaper({ cv, onChange, highlight, rewriting, onRewrite }: {
         </p>
       </header>
 
-      <section className="cv-section">
+      {/* Two-column templates lay out .cv-main and .cv-side side by side; every other template ignores these wrappers. */}
+      <div className="cv-body">
+      <div className="cv-main">
+      <section className="cv-section cv-sec-summary">
         <h2>Mục tiêu nghề nghiệp {rewriteButton("summary", 0)}</h2>
         <div className={hl("summary-0")}><Editable multiline value={cv.summary} placeholder="Mô tả ngắn về mục tiêu và thế mạnh của bạn" onChange={(summary) => patch({ summary })} /></div>
       </section>
 
-      <section className="cv-section">
+      <section className="cv-section cv-sec-education">
         <h2>Học vấn {addButton("education")}</h2>
         {cv.education.map((item, index) => (
           <div key={index} className="cv-item">
@@ -159,7 +218,7 @@ export function CvPaper({ cv, onChange, highlight, rewriting, onRewrite }: {
         ))}
       </section>
 
-      <section className="cv-section">
+      <section className="cv-section cv-sec-experience">
         <h2>Kinh nghiệm {addButton("experience")}</h2>
         {cv.experience.map((item, index) => (
           <div key={index} className="cv-item">
@@ -175,7 +234,7 @@ export function CvPaper({ cv, onChange, highlight, rewriting, onRewrite }: {
         ))}
       </section>
 
-      <section className="cv-section">
+      <section className="cv-section cv-sec-projects">
         <h2>Dự án {addButton("projects")}</h2>
         {cv.projects.map((item, index) => (
           <div key={index} className="cv-item">
@@ -190,12 +249,14 @@ export function CvPaper({ cv, onChange, highlight, rewriting, onRewrite }: {
         ))}
       </section>
 
-      <section className="cv-section">
+      </div>
+      <div className="cv-side">
+      <section className="cv-section cv-sec-skills">
         <h2>Kỹ năng</h2>
         <Editable value={cv.skills.join(", ")} placeholder="JavaScript, SQL, Docker" onChange={(value) => patch({ skills: splitList(value) })} />
       </section>
 
-      <section className="cv-section">
+      <section className="cv-section cv-sec-languages">
         <h2>Ngoại ngữ {addButton("languages")}</h2>
         {cv.languages.map((item, index) => (
           <div key={index} className="cv-item cv-row">
@@ -206,7 +267,7 @@ export function CvPaper({ cv, onChange, highlight, rewriting, onRewrite }: {
         ))}
       </section>
 
-      <section className="cv-section">
+      <section className="cv-section cv-sec-certificates">
         <h2>Chứng chỉ {addButton("certificates")}</h2>
         {cv.certificates.map((item, index) => (
           <div key={index} className="cv-item cv-row">
@@ -218,7 +279,7 @@ export function CvPaper({ cv, onChange, highlight, rewriting, onRewrite }: {
         ))}
       </section>
 
-      <section className="cv-section">
+      <section className="cv-section cv-sec-links">
         <h2>Liên kết {addButton("links")}</h2>
         {cv.links.map((item, index) => (
           <div key={index} className="cv-item cv-row">
@@ -228,6 +289,8 @@ export function CvPaper({ cv, onChange, highlight, rewriting, onRewrite }: {
           </div>
         ))}
       </section>
+      </div>
+      </div>
     </article>
   );
 }

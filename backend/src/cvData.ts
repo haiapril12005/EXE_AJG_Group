@@ -2,8 +2,23 @@ import { z } from "zod";
 
 const text = (max: number) => z.string().max(max).default("");
 
+/** Photos are stored inline. Only JPEG, PNG and WebP data URLs pass, so no SVG or script can be stored as an image. */
+export const MAX_IMAGE_DATA_URL = 300_000;
+export const imageDataUrlSchema = z.string()
+  .max(MAX_IMAGE_DATA_URL, "Ảnh quá lớn.")
+  .regex(/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/, "Ảnh phải là JPG, PNG hoặc WebP.");
+
+/** Keep in step with CV_TEMPLATES in frontend/app/cv-editor.tsx; a test compares the two lists. */
+export const CV_TEMPLATE_IDS = [
+  "modern", "classic", "minimal", "creative", "executive", "compact",
+  "elegant", "tech", "timeline", "bold", "pastel", "ats",
+  "corporate", "consultant", "formal", "monogram", "slate"
+] as const;
+
 export const cvDataSchema = z.object({
-  template: z.enum(["modern", "classic", "minimal", "creative", "executive", "compact"]).default("modern"),
+  template: z.enum(CV_TEMPLATE_IDS).default("modern"),
+  // A 3x4 portrait shown in the CV header; empty when the CV has none.
+  photo: imageDataUrlSchema.or(z.literal("")).default(""),
   personal_info: z.object({
     name: text(120),
     email: text(320),
@@ -59,7 +74,8 @@ export function emptyCvData(name = ""): CvData {
     skills: [],
     languages: [],
     certificates: [],
-    links: []
+    links: [],
+    photo: ""
   };
 }
 

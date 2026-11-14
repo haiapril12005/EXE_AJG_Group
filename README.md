@@ -11,6 +11,8 @@
 5. **AI Mock Interview:** tạo 3 câu hỏi theo CV và JD (luyện nhanh có thể chọn 5), phát câu hỏi bằng giọng AI, thu âm hoặc nhập câu trả lời. Speech-to-Text tạo bản chép lời để người dùng sửa trước khi nộp. Sau mỗi câu trả lời, người phỏng vấn AI có thể hỏi một câu nối tiếp để đào sâu.
 6. **AI Interview Evaluation:** chấm từng câu trả lời, hiển thị điểm mạnh, điểm cần cải thiện, trích dẫn từ câu trả lời và điểm trung bình phiên. Trả lời lại một câu vẫn giữ các lần trước để so sánh điểm.
 
+Góc màn hình có **chatbox hỗ trợ** cách dùng website: các câu hỏi thường gặp được trả lời ngay; câu hỏi tự nhập được AI trả lời theo hướng dẫn sử dụng trong `backend/src/chat.ts` (cập nhật file này khi đổi trang hoặc nút) và không đọc CV. Hội thoại chỉ nằm trong tab trình duyệt và bị xóa khi đăng xuất. Đổi email ở trang Hồ sơ cá nhân cần mật khẩu và mã xác nhận gửi tới cả email cũ lẫn email mới.
+
 Ba tác vụ AI dùng các model riêng: `GEMINI_MODEL=gemini-3.6-flash` cho phân tích và phỏng vấn, `GEMINI_STT_MODEL=gemini-3.5-transcribe` cho nhận dạng giọng nói, `GEMINI_TTS_MODEL=gemini-3.8-flash-lite-tts` cho tạo giọng nói. Cả ba dùng một `GEMINI_API_KEY` ở backend.
 
 ## Chạy trên máy
