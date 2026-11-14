@@ -57,7 +57,8 @@ const NAV_ITEMS = [
   { href: "/history", label: "Lịch sử" }
 ];
 
-const WIDE_ROUTES = /^\/(?:create|cv|analysis)(?:\/|$)/;
+const WIDE_ROUTES = /^\/(?:create|cv|analysis|admin)(?:\/|$)/;
+const ADMIN_AREA = /^\/admin(?:\/|$)/;
 
 function Brand() {
   return (
@@ -180,6 +181,8 @@ export function AppFrame({ children }: { children: ReactNode }) {
   }
 
   const themeClass = theme === "dark" ? "theme-dark" : "";
+  // The admin area has its own frame: no user navigation, mascot or assistant, and a way back.
+  const inAdmin = ADMIN_AREA.test(pathname);
   if (authLoading) return <main className={`app-shell loading-shell ${themeClass}`}><p>Đang kiểm tra phiên đăng nhập...</p></main>;
   if (!session) return <AuthScreen onSession={signedIn} header={<Brand />} />;
 
@@ -189,16 +192,23 @@ export function AppFrame({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{ session, token, profile, refreshProfile, signOut }}>
-      <main className={`app-shell ${themeClass}`}>
+      <main className={`app-shell ${themeClass}${inAdmin ? " is-admin-area" : ""}`}>
         <header className="site-header no-print">
           <div className="header-inner">
-            <Brand />
-            <nav className="app-nav" aria-label="Điều hướng chính">
-              {[...NAV_ITEMS, ...(profile?.is_admin ? [{ href: "/admin", label: "Quản trị" }] : [])].map((item) => {
-                const active = pathname.startsWith(item.href);
-                return <Link key={item.href} href={item.href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}>{item.label}</Link>;
-              })}
-            </nav>
+            <div className="brand-row">
+              <Brand />
+              {inAdmin && <span className="admin-area-badge">Quản trị</span>}
+            </div>
+            {inAdmin ? (
+              <Link href="/jobs" className="admin-exit-link">← Về ứng dụng</Link>
+            ) : (
+              <nav className="app-nav" aria-label="Điều hướng chính">
+                {NAV_ITEMS.map((item) => {
+                  const active = pathname.startsWith(item.href);
+                  return <Link key={item.href} href={item.href} className={active ? "is-active" : ""} aria-current={active ? "page" : undefined}>{item.label}</Link>;
+                })}
+              </nav>
+            )}
             <div className="header-actions">
               <ThemeToggle theme={theme} onToggle={toggleTheme} />
               <span className="header-divider" />
@@ -250,9 +260,15 @@ export function AppFrame({ children }: { children: ReactNode }) {
                         <strong>Lịch sử hoạt động</strong>
                       </Link>
                       {profile?.is_admin && (
-                        <Link href="/admin" role="menuitem" className="account-menu-item">
-                          <strong>Thống kê</strong>
-                        </Link>
+                        inAdmin ? (
+                          <Link href="/jobs" role="menuitem" className="account-menu-item">
+                            <strong>← Về ứng dụng</strong>
+                          </Link>
+                        ) : (
+                          <Link href="/admin" role="menuitem" className="account-menu-item account-menu-admin">
+                            <strong>Trang quản trị</strong>
+                          </Link>
+                        )
                       )}
                     </div>
 
@@ -269,17 +285,19 @@ export function AppFrame({ children }: { children: ReactNode }) {
         </header>
 
         <div className={`page-content ${WIDE_ROUTES.test(pathname) ? "page-wide" : ""}`}>
-          <div className="page-mascot-bar no-print">
-            <Mascot
-              directions="/mascots/frog-directions.webp"
-              reactions="/mascots/frog-reactions.webp"
-            />
-          </div>
+          {!inAdmin && (
+            <div className="page-mascot-bar no-print">
+              <Mascot
+                directions="/mascots/frog-directions.webp"
+                reactions="/mascots/frog-reactions.webp"
+              />
+            </div>
+          )}
           {notice && <p role="status" className="notice notice-info no-print">{notice}</p>}
           {children}
           <footer className="site-footer no-print"><span>Job Ready · Phân tích có trách nhiệm, không bịa đặt thông tin hồ sơ.</span><span>{profile ? (profile.payments_enabled ? `Còn lại ${profile.credits} credits` : "Dùng thử miễn phí") : ""}</span></footer>
         </div>
-        <ChatBox />
+        {!inAdmin && <ChatBox />}
       </main>
     </AppContext.Provider>
   );

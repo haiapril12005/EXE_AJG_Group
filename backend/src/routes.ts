@@ -10,14 +10,19 @@ import { inspectCvQuality, scoreQualityIssues } from "./cvQuality";
 import { requireAuth, type AuthenticatedRequest } from "./auth";
 import { config } from "./config";
 import { HttpError } from "./errors";
+import { categoriesOfFilter, JOB_CATEGORY_FILTERS, JOB_CATEGORY_GROUPS } from "./jobs/categories";
 import { createPayOSPayment, verifyPayOSWebhook } from "./payments";
 import { authClient, supabase } from "./supabase";
 import { parseBody } from "./validation";
 import { synthesizeQuestion, transcribeAudio } from "./speech";
 import { normalizeEvidence } from "./scoring";
+import { withAiContext } from "./aiUsage";
+import { fetchAdminActivity, fetchAdminJobStats, fetchAdminUserDetail, fetchAiUsageReport, listAdminTransactions } from "./adminAnalytics";
 import { followUpQuestionOf, interviewQuestionsSchema, MAX_QUESTIONS, overallScore, withPreviousAttempt } from "./interview";
 
 const router = Router();
+// Keeps the request in async context so each AI call is recorded with its user and feature.
+router.use(withAiContext);
 
 const LIST_PAGE_SIZE = 20;
 const listPageSchema = z.object({ page: z.coerce.number().int().min(1).max(1000).default(1) });
@@ -340,6 +345,61 @@ router.get("/admin/users", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+const adminDaysSchema = z.object({ days: z.coerce.number().int().refine((value) => [7, 30, 90].includes(value)).default(30) });
+
+router.get("/admin/activity", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const parsed = adminDaysSchema.safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, "days must be 7, 30 or 90");
+    res.json({ activity: await fetchAdminActivity(parsed.data.days) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/admin/ai-usage", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const parsed = adminDaysSchema.safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, "days must be 7, 30 or 90");
+    res.json({ report: await fetchAiUsageReport(parsed.data.days) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/admin/users/:userId", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = z.string().uuid().safeParse(req.params.userId);
+    if (!id.success) throw new HttpError(400, "Invalid user id");
+    res.json({ detail: await fetchAdminUserDetail(id.data) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+const adminTransactionListSchema = z.object({
+  status: z.enum(["PENDING", "SUCCESS", "CANCELLED"]).optional(),
+  page: z.coerce.number().int().min(1).max(1000).default(1)
+});
+
+router.get("/admin/transactions", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const parsed = adminTransactionListSchema.safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, "Invalid transaction filters");
+    res.json(await listAdminTransactions(parsed.data.status, parsed.data.page));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/admin/jobs", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    res.json({ stats: await fetchAdminJobStats() });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 router.post("/cv/upload", requireAuth, upload.single("file"), async (req: AuthenticatedRequest, res) => {
   try {
     const file = req.file;
@@ -600,11 +660,13 @@ router.post("/ai/rewrite-section", requireAuth, async (req: AuthenticatedRequest
   }
 });
 
-const JOB_PAGE_SIZE = 20;
+// Divides evenly into the job grid's 2, 3 or 4 columns.
+const JOB_PAGE_SIZE = 24;
 const jobListSchema = z.object({
   q: z.string().trim().max(100).optional(),
   city: z.string().trim().max(40).optional(),
   saved: z.enum(["1", "true", "0", "false"]).optional(),
+  category: z.enum(JOB_CATEGORY_FILTERS).optional(),
   page: z.coerce.number().int().min(1).max(1000).default(1)
 });
 
@@ -612,6 +674,24 @@ function jobStoreError(error: { code?: string }) {
   return error.code === "PGRST205"
     ? new HttpError(503, "Kho việc làm chưa sẵn sàng. Hãy chạy migration 004_job_postings.sql rồi chạy npm run jobs:sync.")
     : error;
+}
+
+// 42703 / PGRST202: the category column or the count function from migration 010 is missing.
+function jobCategoryError(error: { code?: string }) {
+  return error.code === "42703" || error.code === "PGRST202"
+    ? new HttpError(503, "Danh mục nghề nghiệp chưa sẵn sàng. Hãy chạy migration 010_job_categories.sql rồi chạy npm run jobs:sync.")
+    : jobStoreError(error);
+}
+
+async function countJobsByCategory(city: string | undefined) {
+  const { data, error } = await supabase.rpc("job_category_counts", { p_city: city || null });
+  if (error) throw jobCategoryError(error);
+  const totals = new Map((data as { category: string; total: number }[] ?? []).map((row) => [row.category, Number(row.total)]));
+  // Every occupation is listed, including ones with no postings yet.
+  return JOB_CATEGORY_GROUPS.map((group) => {
+    const categories = group.categories.map(({ id, label }) => ({ id, label, count: totals.get(id) ?? 0 }));
+    return { id: group.id, label: group.label, count: categories.reduce((sum, item) => sum + item.count, 0), categories };
+  });
 }
 
 function isMissingSavedJobsTable(error: { code?: string; message?: string } | null): boolean {
@@ -660,7 +740,7 @@ router.get("/jobs", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const parsed = jobListSchema.safeParse(req.query);
     if (!parsed.success) throw new HttpError(400, "Invalid job filters");
-    const { q, city, saved, page } = parsed.data;
+    const { q, city, saved, category, page } = parsed.data;
     const onlySaved = saved === "1" || saved === "true";
     const savedIds = await loadSavedJobIds(userId(req));
 
@@ -670,7 +750,7 @@ router.get("/jobs", requireAuth, async (req: AuthenticatedRequest, res) => {
     }
 
     let query = supabase.from("job_postings")
-      .select("id,company,title,location,city,url,posted_at", { count: "exact" })
+      .select("id,company,title,location,city,url,posted_at,category", { count: "exact" })
       .eq("is_active", true);
     if (onlySaved) {
       query = query.in("id", savedIds);
@@ -682,13 +762,15 @@ router.get("/jobs", requireAuth, async (req: AuthenticatedRequest, res) => {
       query = query.or(`title.ilike.%${word}%,company.ilike.%${word}%,description.ilike.%${word}%`);
     }
     if (city) query = query.eq("city", city);
+    if (category) query = query.in("category", categoriesOfFilter(category));
     const from = (page - 1) * JOB_PAGE_SIZE;
-    const { data, error, count } = await query
-      .order("posted_at", { ascending: false, nullsFirst: false }).order("id")
-      .range(from, from + JOB_PAGE_SIZE - 1);
+    const [{ data, error, count }, categoryGroups] = await Promise.all([
+      query.order("posted_at", { ascending: false, nullsFirst: false }).order("id").range(from, from + JOB_PAGE_SIZE - 1),
+      countJobsByCategory(city),
+    ]);
     // PGRST103: the requested page is past the last result.
-    if (error && error.code !== "PGRST103") throw jobStoreError(error);
-    res.json({ jobs: data ?? [], total: count ?? 0, page, page_size: JOB_PAGE_SIZE, saved_ids: savedIds });
+    if (error && error.code !== "PGRST103") throw jobCategoryError(error);
+    res.json({ jobs: data ?? [], total: count ?? 0, page, page_size: JOB_PAGE_SIZE, saved_ids: savedIds, category_groups: categoryGroups });
   } catch (error) {
     sendError(res, error);
   }

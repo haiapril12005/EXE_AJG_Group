@@ -6,6 +6,7 @@ import { assertSourceBoundRewrite, assertStructuredCvGrounded, groundEvidence, g
 import type { QualityIssue } from "./cvQuality";
 import { usableQuestions } from "./interview";
 import { SITE_GUIDE, type ChatInput } from "./chat";
+import { recordAiUsage } from "./aiUsage";
 
 /** The AI answered, but with output that is malformed or cannot be verified; asking again may work. */
 class InvalidAiOutputError extends HttpError {
@@ -167,12 +168,14 @@ async function generateJson<T>(
         generation_config: { thinking_level: "low" },
         store: false
       }, { timeout_ms: 60_000, maxRetries: 0 });
+      recordAiUsage({ model, result, startedAt, success: true });
       // Strip null bytes () — PostgreSQL text fields reject them
       text = result.output_text?.replace(/\u0000/g, "") ?? undefined;
       console.log(`Gemini ${model} responded in ${Date.now() - startedAt}ms`);
       break;
     } catch (error) {
       console.error(`Gemini generation failed (${model}): ${errorMessage(error).slice(0, 160)}`);
+      recordAiUsage({ model, startedAt, success: false });
       if (index < models.length - 1 && isRetryableModelError(error)) continue;
       if (error instanceof HttpError) throw error;
       throw new HttpError(502, "AI chưa thể hoàn tất phân tích. Vui lòng thử lại sau.");

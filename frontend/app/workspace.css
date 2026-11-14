@@ -426,21 +426,40 @@
 .job-chip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 16px 0 -8px; padding: 8px 14px; border-radius: 14px; background: rgba(16, 185, 129, .1); color: var(--ink); font-size: 12px; }
 .job-chip strong { color: var(--heading); }
 .job-chip .text-button { margin-left: auto; padding: 0; }
-.job-filters { display: grid; grid-template-columns: minmax(0, 1fr) 220px 110px; gap: 10px; margin-bottom: 14px; }
+.job-filters { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr) 200px 110px; gap: 10px; margin-bottom: 14px; }
 .job-filters .primary-button { min-height: 44px; padding: 8px 12px; }
 .job-count { margin: 0 0 12px; color: var(--muted); font-size: 13px; font-weight: 700; }
-.job-list { display: grid; gap: 14px; }
-.job-card { padding: 20px 22px; border-radius: 18px; }
-.job-card-heading { display: flex; justify-content: space-between; gap: 16px; }
-.job-card h2 { margin: 0; color: var(--heading); font-size: 17px; font-weight: 900; line-height: 1.35; }
-.job-card-heading p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-.job-card-heading small { flex: 0 0 auto; color: var(--muted); font-size: 12px; }
-.job-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; }
-.job-card-actions .primary-button, .job-card-actions .secondary-button { width: auto; min-height: 40px; padding: 8px 18px; text-decoration: none; }
-.job-description { margin: 16px 0 0; padding: 16px; max-height: 420px; overflow: auto; border-radius: 12px; background: var(--surface-muted); color: var(--ink); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+.job-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 16px; align-items: stretch; grid-auto-flow: row dense; }
+.job-card { display: flex; min-width: 0; flex-direction: column; gap: 12px; padding: 18px; border-radius: 18px; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.job-card:hover { border-color: rgba(16, 185, 129, .4); box-shadow: 0 10px 28px rgba(15, 23, 42, .08); transform: translateY(-2px); }
+/* An open description gets the whole row, so it is readable and the other cards keep their size;
+   the grid's dense flow moves later cards up into the gap it leaves. */
+.job-card.is-open { grid-column: 1 / -1; transform: none; }
+.job-card-top { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.job-logo { display: grid; flex: 0 0 auto; width: 42px; height: 42px; place-items: center; border-radius: 12px; background: rgba(16, 185, 129, .14); color: var(--green-hover); font-size: 14px; font-weight: 900; letter-spacing: .02em; }
+.job-card-company { display: grid; min-width: 0; gap: 2px; }
+.job-card-company strong { overflow: hidden; color: var(--heading); font-size: 14px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.job-card-company small { color: var(--muted); font-size: 12px; }
+.job-card h2 { display: -webkit-box; margin: 0; overflow: hidden; color: var(--heading); font-size: 16px; font-weight: 900; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.job-card.is-open h2 { display: block; }
+.job-card-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.job-card-meta span { max-width: 100%; padding: 4px 10px; overflow: hidden; border-radius: 999px; background: var(--surface-muted); color: var(--muted); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.job-card-meta .job-location::before { content: "📍 "; }
+.job-card-meta .job-category-tag { background: rgba(16, 185, 129, .1); color: var(--green-hover); }
+.job-card-actions { display: grid; gap: 10px; margin-top: auto; padding-top: 4px; }
+.job-card-actions .primary-button { width: 100%; min-height: 42px; padding: 8px 14px; text-align: center; text-decoration: none; }
+.job-card-links { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.job-card-links .secondary-button { width: auto; min-height: 36px; padding: 6px 12px; font-size: 13px; text-decoration: none; }
+.job-card-links .inline-link { margin-left: auto; font-size: 13px; }
+.job-card.is-open .job-card-actions { grid-template-columns: minmax(0, 280px) 1fr; align-items: center; }
+.job-description { margin: 4px 0 0; padding: 16px; max-height: 420px; overflow: auto; border-radius: 12px; background: var(--surface-muted); color: var(--ink); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
 .job-pager { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 22px; color: var(--muted); font-size: 13px; }
 .job-pager .secondary-button { width: auto; }
-@media (max-width: 640px) { .job-filters { grid-template-columns: 1fr; } .job-card-heading { flex-direction: column; gap: 4px; } }
+@media (max-width: 960px) { .job-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (max-width: 640px) {
+  .job-filters { grid-template-columns: 1fr; }
+  .job-card.is-open .job-card-actions { grid-template-columns: 1fr; }
+}
 
 /* Each JD requirement with its CV evidence, inside the experience and education cards. */
 .requirement-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }

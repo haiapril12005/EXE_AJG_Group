@@ -5,16 +5,27 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../../utils/api";
 import { useApp } from "../app-frame";
 
-type Job = { id: string; company: string; title: string; location: string; city: string; url: string; posted_at: string | null };
-type JobPage = { jobs: Job[]; total: number; page: number; page_size: number; saved_ids?: string[] };
+type Job = { id: string; company: string; title: string; location: string; city: string; url: string; posted_at: string | null; category?: string };
+type JobCategory = { id: string; label: string; count: number };
+type JobCategoryGroup = JobCategory & { categories: JobCategory[] };
+type JobPage = { jobs: Job[]; total: number; page: number; page_size: number; saved_ids?: string[]; category_groups?: JobCategoryGroup[] };
 
 const CITIES = ["Hồ Chí Minh", "Hà Nội", "Đà Nẵng", "Việt Nam"];
+
+/** Up to two letters from the company name, shown where a logo would be. */
+function companyInitials(company: string) {
+  const words = company.trim().split(/\s+/u).filter(Boolean);
+  const letters = words.length > 1 ? words[0][0] + words[1][0] : company.trim().slice(0, 2);
+  return letters.toLocaleUpperCase("vi-VN") || "?";
+}
 
 export default function JobsPage() {
   const { token } = useApp();
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   const [city, setCity] = useState("");
+  const [category, setCategory] = useState("");
+  const [categoryGroups, setCategoryGroups] = useState<JobCategoryGroup[]>([]);
   const [onlySaved, setOnlySaved] = useState(false);
   const [savedIds, setSavedIds] = useState<string[]>([]);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -39,12 +50,14 @@ export default function JobsPage() {
     if (query) params.set("q", query);
     if (city) params.set("city", city);
     if (onlySaved) params.set("saved", "1");
+    if (category) params.set("category", category);
     void api<JobPage>(`/jobs?${params}`, token).then((next) => {
       if (!active) return;
       setResult(next);
       if (Array.isArray(next.saved_ids)) {
         setSavedIds(next.saved_ids);
       }
+      if (Array.isArray(next.category_groups)) setCategoryGroups(next.category_groups);
       setNotice("");
     }).catch((error: Error) => {
       if (!active) return;
@@ -56,12 +69,19 @@ export default function JobsPage() {
     return () => { active = false; };
     // A refreshed token does not change the list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, city, onlySaved, page]);
+  }, [query, city, category, onlySaved, page]);
 
   function search(event: FormEvent) {
     event.preventDefault();
     setPage(1);
     setQuery(draft.trim());
+  }
+
+  function chooseCategory(next: string) {
+    if (category === next) return;
+    setPage(1);
+    setOpenJob(null);
+    setCategory(next);
   }
 
   function switchTab(savedMode: boolean) {
@@ -113,6 +133,9 @@ export default function JobsPage() {
   }
 
   const lastPage = result ? Math.max(1, Math.ceil(result.total / result.page_size)) : 1;
+  const categoryLabel = new Map(categoryGroups.flatMap((group) => [group, ...group.categories]).map((item) => [item.id, item.label]));
+  const catalogTotal = categoryGroups.reduce((sum, group) => sum + group.count, 0);
+  const countLabel = (count: number) => count ? ` (${count.toLocaleString("vi-VN")})` : " (chưa có tin)";
 
   return (
     <>
@@ -139,11 +162,21 @@ export default function JobsPage() {
           className={`job-tab ${onlySaved ? "is-active" : ""}`}
           onClick={() => switchTab(true)}
         >
-          ★ Xem sau · Đã lưu ({savedIds.length})
+          ★ Xem sau ({savedIds.length})
         </button>
       </div>
 
       <form className="job-filters" onSubmit={search} role="search">
+        <select className="form-input job-category-select" value={category} aria-label="Ngành nghề"
+          onChange={(event) => chooseCategory(event.target.value)}>
+          <option value="">{`Tất cả ngành nghề${catalogTotal ? ` (${catalogTotal.toLocaleString("vi-VN")})` : ""}`}</option>
+          {categoryGroups.map((group) => (
+            <optgroup key={group.id} label={group.label}>
+              <option value={group.id}>{`Tất cả ${group.label}${countLabel(group.count)}`}</option>
+              {group.categories.map((item) => <option key={item.id} value={item.id}>{`${item.label}${countLabel(item.count)}`}</option>)}
+            </optgroup>
+          ))}
+        </select>
         <input className="form-input" type="search" value={draft} maxLength={100} onChange={(event) => setDraft(event.target.value)}
           placeholder="Vị trí, công ty hoặc kỹ năng (vd: backend typescript)" aria-label="Tìm việc làm" />
         <select className="form-input" value={city} aria-label="Khu vực" onChange={(event) => { setPage(1); setCity(event.target.value); }}>
@@ -173,37 +206,48 @@ export default function JobsPage() {
             </button>
           </div>
         ) : (
-          <p className="empty-copy">Không có việc làm phù hợp. Mỗi từ khóa phải xuất hiện trong tiêu đề, tên công ty hoặc mô tả; hãy bớt từ khóa. Nếu kho còn trống, API sẽ tự nạp tin sau khi khởi động, hoặc chạy npm run jobs:sync.</p>
+          category && !query ? (
+            <p className="empty-copy">Chưa có tin tuyển dụng nào cho ngành <strong>{categoryLabel.get(category) ?? category}</strong>{city ? ` tại ${city}` : ""}. Kho việc làm tự cập nhật định kỳ; hãy quay lại sau, chọn ngành gần với ngành này hoặc xem <button type="button" className="text-button" onClick={() => chooseCategory("")}>tất cả ngành nghề</button>.</p>
+          ) : <p className="empty-copy">Không có việc làm phù hợp. Mỗi từ khóa phải xuất hiện trong tiêu đề, tên công ty hoặc mô tả; hãy bớt từ khóa. Nếu kho còn trống, API sẽ tự nạp tin sau khi khởi động, hoặc chạy npm run jobs:sync.</p>
         )
       )}
 
-      <div className="job-list">
+      <div className="job-grid">
         {result?.jobs.map((job) => {
           const isSaved = savedIds.includes(job.id);
+          const isOpen = openJob === job.id;
+          const categoryName = job.category ? categoryLabel.get(job.category) : undefined;
           return (
-            <article key={job.id} className="soft-card job-card">
-              <div className="job-card-heading">
-                <div>
-                  <h2>{job.title}</h2>
-                  <p>{job.company} · {job.location || job.city}</p>
+            <article key={job.id} className={`soft-card job-card${isOpen ? " is-open" : ""}`}>
+              <div className="job-card-top">
+                <span className="job-logo" aria-hidden="true">{companyInitials(job.company)}</span>
+                <div className="job-card-company">
+                  <strong>{job.company}</strong>
+                  {job.posted_at && <small>Đăng ngày {new Date(job.posted_at).toLocaleDateString("vi-VN")}</small>}
                 </div>
-                {job.posted_at && <small>{new Date(job.posted_at).toLocaleDateString("vi-VN")}</small>}
+              </div>
+              <h2>{job.title}</h2>
+              <div className="job-card-meta">
+                <span className="job-location">{job.location || job.city}</span>
+                {categoryName && job.category !== "other" && <span className="job-category-tag">{categoryName}</span>}
               </div>
               <div className="job-card-actions">
                 <Link href={`/analyze?job=${job.id}`} className="primary-button">Phân tích với CV của tôi</Link>
-                <button type="button" className="secondary-button" aria-expanded={openJob === job.id} onClick={() => void toggleJob(job.id)}>{openJob === job.id ? "Ẩn mô tả" : "Xem mô tả"}</button>
-                <button
-                  type="button"
-                  className={`secondary-button job-save-button ${isSaved ? "is-saved" : ""}`}
-                  aria-pressed={isSaved}
-                  disabled={savingId === job.id}
-                  onClick={() => void toggleSaveJob(job.id)}
-                >
-                  {isSaved ? "★ Đã lưu" : "☆ Lưu xem sau"}
-                </button>
-                <a href={job.url} target="_blank" rel="noreferrer" className="inline-link">Tin gốc ↗</a>
+                <div className="job-card-links">
+                  <button type="button" className="secondary-button" aria-expanded={isOpen} onClick={() => void toggleJob(job.id)}>{isOpen ? "Ẩn mô tả" : "Xem mô tả"}</button>
+                  <button
+                    type="button"
+                    className={`secondary-button job-save-button ${isSaved ? "is-saved" : ""}`}
+                    aria-pressed={isSaved}
+                    disabled={savingId === job.id}
+                    onClick={() => void toggleSaveJob(job.id)}
+                  >
+                    {isSaved ? "★ Đã lưu" : "☆ Lưu xem sau"}
+                  </button>
+                  <a href={job.url} target="_blank" rel="noreferrer" className="inline-link">Tin gốc ↗</a>
+                </div>
               </div>
-              {openJob === job.id && <p className="job-description">{descriptions[job.id] ?? "Đang tải mô tả..."}</p>}
+              {isOpen && <p className="job-description">{descriptions[job.id] ?? "Đang tải mô tả..."}</p>}
             </article>
           );
         })}

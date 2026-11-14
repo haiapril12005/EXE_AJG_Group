@@ -1,0 +1,478 @@
+/* Visual polish layer. Loaded after globals.css and workspace.css, it keeps the emerald palette and every
+   layout, and refines type, weight, spacing, depth and interaction states so the app reads calmer and
+   more professional. CV papers keep their own fonts (they are what users export), so nothing here
+   reaches inside .cv-paper except the font pin below. */
+
+/* Fonts (Be Vietnam Pro for the app, Nunito and Lora for the CV templates) load from a <link> in
+   layout.tsx: a CSS @import is dropped once the bundler merges stylesheets. */
+
+:root {
+  --green: #10b981;
+  --green-hover: #059669;
+  --green-strong: #047857;
+  --green-soft: rgba(16, 185, 129, .1);
+  --green-ring: rgba(16, 185, 129, .18);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}
+
+/* ---------- Tokens ---------- */
+.app-shell {
+  --page: #f6f8fa;
+  --surface: #ffffff;
+  --surface-soft: #f1f5f9;
+  --surface-muted: #f8fafc;
+  --ink: #334155;
+  --heading: #0f172a;
+  --muted: #64748b;
+  --subtle: #94a3b8;
+  --line: #e5e9f0;
+  --line-strong: #d5dbe4;
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, .05);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, .04), 0 2px 8px -2px rgba(15, 23, 42, .06);
+  --shadow-md: 0 2px 4px rgba(15, 23, 42, .04), 0 12px 28px -8px rgba(15, 23, 42, .12);
+  --soft-shadow: var(--shadow-sm);
+  background:
+    radial-gradient(1200px 420px at 50% -180px, rgba(16, 185, 129, .07), transparent 70%),
+    var(--page);
+  background-attachment: fixed;
+}
+
+/* Dark mode stays true black, as designed (and as the UI tests check); only depth tokens are added. */
+.app-shell.theme-dark {
+  --line-strong: #383838;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .35), 0 4px 12px -4px rgba(0, 0, 0, .5);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, .35), 0 16px 32px -10px rgba(0, 0, 0, .65);
+  --soft-shadow: var(--shadow-sm);
+  background: var(--page);
+}
+
+/* ---------- Typography ---------- */
+body {
+  font-family: "Be Vietnam Pro", "Segoe UI", Arial, Helvetica, sans-serif;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* The default CV templates were designed around Nunito; keep them identical in the editor and the PDF. */
+.cv-paper { font-family: "Nunito", "Segoe UI", Arial, Helvetica, sans-serif; }
+
+.hero h1,
+.page-heading h1 {
+  font-weight: 800;
+  letter-spacing: -.03em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.hero h1 { font-size: clamp(30px, 4vw, 42px); }
+.page-heading h1 { font-size: clamp(26px, 3vw, 34px); }
+
+.hero > p:last-child,
+.page-heading p:last-child:not(.eyebrow) {
+  font-size: 15px;
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--green-hover);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+
+.theme-dark .eyebrow { color: var(--green); }
+
+.eyebrow::before {
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  content: "";
+}
+
+.hero .eyebrow::before { display: none; }
+
+.section-heading h2,
+.section-heading h3 { font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+.section-heading p { font-size: 13px; }
+
+.results-heading h2,
+.history-heading h2,
+.quality-heading h2 { font-weight: 800; letter-spacing: -.02em; }
+
+.history-grid h3 { font-size: 16px; font-weight: 700; }
+
+.job-card h2 { font-size: 15.5px; font-weight: 700; letter-spacing: -.005em; }
+.job-card-company strong { font-weight: 600; }
+
+.admin-kpi-value { font-weight: 800; font-variant-numeric: tabular-nums; }
+.score-summary strong { font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* ---------- Header ---------- */
+.site-header {
+  border-bottom-color: var(--line);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: saturate(180%) blur(14px);
+}
+
+.header-inner { min-height: 68px; }
+
+.brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: linear-gradient(140deg, #34d399, var(--green-hover));
+  box-shadow: 0 4px 12px -2px rgba(5, 150, 105, .45), inset 0 1px 0 rgba(255, 255, 255, .25);
+  color: #fff;
+  font-size: 24px;
+}
+
+.brand strong { font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
+.brand small { font-size: 9px; font-weight: 600; letter-spacing: .12em; }
+
+.app-nav {
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-muted);
+}
+
+.app-nav a {
+  padding: 7px 14px;
+  border-radius: 9px;
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+
+.app-nav a:hover { background: var(--surface-soft); color: var(--heading); }
+
+.app-nav a.is-active {
+  background: var(--surface);
+  box-shadow: var(--shadow-xs), 0 0 0 1px var(--line);
+  color: var(--green-hover);
+}
+
+.theme-dark .app-nav a.is-active { color: var(--green); }
+
+@media (max-width: 1040px) {
+  .app-nav { margin-bottom: 10px; padding: 4px; }
+}
+
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.theme-toggle:hover { transform: none; background: var(--surface-soft); color: var(--heading); }
+
+.header-divider { height: 24px; }
+
+.profile-chip {
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.account-trigger { padding: 4px 10px 4px 4px; }
+.account-trigger:hover, .account-trigger[aria-expanded="true"] { box-shadow: 0 0 0 3px var(--green-ring); }
+
+.avatar {
+  border-radius: 9px;
+  background: var(--green-soft);
+  color: var(--green-hover);
+  font-weight: 700;
+}
+
+.profile-name { font-weight: 600; }
+
+.credits-chip {
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.account-dropdown {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: polish-pop .14s var(--ease);
+}
+
+.account-dropdown-title strong { font-weight: 700; }
+.account-menu-item { border-radius: var(--radius-sm); }
+.account-menu-item strong { font-weight: 600; }
+.account-logout-btn { border-radius: var(--radius-sm); font-weight: 600; }
+
+@keyframes polish-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- Page rhythm ---------- */
+.page-content { padding-top: 32px; }
+.page-heading { margin-bottom: 28px; }
+
+/* ---------- Cards ---------- */
+.soft-card {
+  border-color: var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.input-card,
+.result-card { padding: 24px; }
+
+.job-card {
+  border-radius: var(--radius-lg);
+  transition: border-color .2s var(--ease), box-shadow .2s var(--ease), transform .2s var(--ease);
+}
+
+.job-card:hover {
+  border-color: rgba(16, 185, 129, .35);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.job-logo {
+  border-radius: var(--radius-sm);
+  background: var(--green-soft);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .18);
+  font-weight: 700;
+}
+
+.job-card-meta span {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.job-card-meta .job-category-tag {
+  border-color: rgba(16, 185, 129, .22);
+  background: var(--green-soft);
+  font-weight: 600;
+}
+
+.job-description { border: 1px solid var(--line); border-radius: var(--radius-md); }
+
+.job-tabs { border-radius: 12px; padding: 4px; gap: 2px; background: var(--surface-muted); }
+.job-tab { border-radius: 9px; font-weight: 600; }
+.job-tab.is-active {
+  background: var(--surface);
+  box-shadow: var(--shadow-xs), 0 0 0 1px var(--line);
+  color: var(--green-hover);
+}
+.theme-dark .job-tab.is-active { color: var(--green); }
+
+.job-chip { border: 1px solid rgba(16, 185, 129, .2); border-radius: var(--radius-md); }
+
+.admin-kpi-card { padding: 22px; }
+.admin-kpi-card .eyebrow::before { display: none; }
+.history-grid .soft-card { padding: 22px; }
+
+.result-inset,
+.education-item,
+.project-item,
+.question-list li { border-radius: var(--radius-md); }
+
+.layer-icon { border-radius: 11px; }
+.step-badge {
+  background: var(--green-soft);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .25);
+  color: var(--green-hover);
+  font-weight: 700;
+}
+
+.theme-dark .step-badge,
+.theme-dark .avatar,
+.theme-dark .job-logo { color: var(--green); }
+
+.pill { font-weight: 600; border-radius: 8px; }
+.premium-badge { font-weight: 700; }
+.admin-badge, .admin-role-pill { font-weight: 700; }
+
+/* ---------- Buttons ---------- */
+.primary-button,
+.secondary-button,
+.unlock-button {
+  min-height: 44px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -.005em;
+  transition: transform .15s var(--ease), background-color .15s ease, border-color .15s ease,
+    box-shadow .15s ease, color .15s ease, opacity .15s ease;
+}
+
+.primary-button {
+  background: linear-gradient(180deg, #14c08b, var(--green-hover));
+  box-shadow: 0 1px 2px rgba(5, 150, 105, .3), 0 4px 12px -2px rgba(16, 185, 129, .35),
+    inset 0 1px 0 rgba(255, 255, 255, .18);
+}
+
+.primary-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: linear-gradient(180deg, var(--green), var(--green-strong));
+  box-shadow: 0 2px 4px rgba(5, 150, 105, .3), 0 8px 20px -4px rgba(16, 185, 129, .45),
+    inset 0 1px 0 rgba(255, 255, 255, .18);
+}
+
+.primary-button:active:not(:disabled),
+.secondary-button:active:not(:disabled),
+.unlock-button:active:not(:disabled) { transform: translateY(0) scale(.99); }
+
+.secondary-button {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-xs);
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: rgba(16, 185, 129, .55);
+  background: color-mix(in srgb, var(--green) 5%, var(--surface));
+  color: var(--green-hover);
+}
+
+.theme-dark .secondary-button:hover:not(:disabled) { color: var(--green); }
+
+.unlock-button { box-shadow: var(--shadow-sm); }
+
+.text-button { font-weight: 600; }
+.inline-link { font-weight: 600; }
+
+.choose-file {
+  border-radius: 10px;
+  font-weight: 600;
+  box-shadow: var(--shadow-xs);
+}
+
+:where(.app-shell) :is(button, a, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+/* ---------- Forms ---------- */
+.form-input,
+.jd-input {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  color: var(--heading);
+  font-weight: 400;
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+
+.form-input { min-height: 44px; border-radius: 11px; }
+.jd-input { border-radius: var(--radius-md); font-size: 14px; }
+
+.form-input:hover:not(:focus):not(:disabled),
+.jd-input:hover:not(:focus) { border-color: color-mix(in srgb, var(--line-strong) 60%, var(--muted)); }
+
+.jd-input:focus,
+.form-input:focus { border-color: var(--green); box-shadow: 0 0 0 4px var(--green-ring); }
+
+.field-label { font-size: 13px; font-weight: 600; color: var(--heading); }
+
+select.form-input {
+  appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 12px center;
+  background-repeat: no-repeat;
+}
+
+.drop-area {
+  border-width: 1.5px;
+  border-color: var(--line-strong);
+  border-radius: var(--radius-lg);
+}
+
+.drop-area:hover,
+.drop-area:focus-visible { background: color-mix(in srgb, var(--green) 4%, var(--surface-muted)); }
+
+.upload-icon {
+  border-radius: 14px;
+  background: var(--green-soft);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, .2);
+  font-size: 26px;
+}
+
+.drop-area strong { font-weight: 700; }
+
+.file-status { border-radius: var(--radius-md); }
+.file-icon { font-weight: 700; }
+
+.jd-details { border-radius: var(--radius-md); box-shadow: var(--shadow-xs); }
+.jd-details summary { font-weight: 600; }
+
+/* ---------- Notices & footer ---------- */
+.notice { border-radius: var(--radius-md); box-shadow: var(--shadow-xs); }
+.notice-info { border-left: 3px solid var(--green); }
+
+.site-footer {
+  margin-top: 56px;
+  padding: 22px 0 28px;
+  font-size: 12.5px;
+}
+
+/* ---------- Chat ---------- */
+.chat-launcher {
+  border-radius: 16px;
+  background: linear-gradient(140deg, #34d399, var(--green-hover));
+  box-shadow: 0 10px 24px -6px rgba(5, 150, 105, .55);
+  transition: transform .2s var(--ease), box-shadow .2s var(--ease);
+}
+
+.chat-launcher:hover { transform: translateY(-2px); background: linear-gradient(140deg, #10b981, var(--green-strong)); }
+
+.chat-panel {
+  border-radius: 20px;
+  box-shadow: 0 24px 60px -16px rgba(15, 23, 42, .35);
+  animation: polish-pop .18s var(--ease);
+}
+
+.chat-header { padding: 14px 16px; background: var(--surface-muted); }
+.chat-header strong { font-weight: 700; }
+.chat-close { border-radius: 9px; }
+.chat-message { border-radius: 14px; font-size: 13.5px; }
+.chat-user { border-bottom-right-radius: 4px; background: var(--green-strong); }
+.chat-assistant { border-bottom-left-radius: 4px; }
+.chat-suggestion { border-radius: 11px; font-weight: 500; transition: border-color .15s ease, color .15s ease, background-color .15s ease; }
+.chat-suggestion:hover:not(:disabled) { background: color-mix(in srgb, var(--green) 5%, var(--surface)); }
+
+/* ---------- Template picker (cards only, not the CV previews) ---------- */
+.template-card { border-radius: var(--radius-md); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.template-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+
+/* ---------- Scrollbars ---------- */
+.app-shell { scrollbar-color: var(--line-strong) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell *,
+  .app-shell *::before,
+  .app-shell *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+@media (max-width: 760px) {
+  .page-content { padding-top: 24px; }
+  .input-card,
+  .result-card { padding: 20px; }
+}
+
+@media print {
+  .app-shell { background: #fff; }
+}

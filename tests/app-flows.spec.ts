@@ -70,8 +70,19 @@ const EVALUATIONS = [
 ];
 const JOB = {
   id: JOB_ID, company: "Grab", title: "Backend Engineer", location: "Ho Chi Minh City, Vietnam", city: "Hồ Chí Minh",
-  url: "https://example.com/job", posted_at: "2026-10-20T00:00:00.000Z",
+  url: "https://example.com/job", posted_at: "2026-10-20T00:00:00.000Z", category: "backend",
 };
+
+const JOB_CATEGORY_GROUPS = [
+  { id: "group-it", label: "Công nghệ thông tin", count: 1, categories: [
+    { id: "backend", label: "Lập trình Backend", count: 1 },
+    { id: "game", label: "Phát triển game", count: 0 },
+  ] },
+  { id: "group-product", label: "Sản phẩm & Thiết kế", count: 3, categories: [
+    { id: "ui_ux", label: "Thiết kế UI/UX", count: 3 },
+  ] },
+];
+const GROUP_OF: Record<string, string> = { backend: "group-it", game: "group-it", ui_ux: "group-product" };
 
 function session() {
   const issuedAt = Math.floor(Date.now() / 1000);
@@ -201,6 +212,63 @@ async function mockServices(context: BrowserContext, { jobsStatus = 200, savedCv
           }
         });
       }
+      if (path === "/admin/activity") {
+        if (!isAdmin) return reply(route, 403, { error: "Chỉ tài khoản quản trị (Admin) mới có quyền truy cập trang thống kê này." });
+        const days = Number(url.searchParams.get("days") ?? 30);
+        const daily = Array.from({ length: days }, (_, index) => ({
+          day: new Date(Date.UTC(2026, 10, 14 - (days - 1 - index))).toISOString().slice(0, 10),
+          new_users: index % 3, analyses: index % 5, interviews: index % 2, cvs: 1,
+        }));
+        return reply(route, 200, { activity: {
+          days, daily,
+          current: { new_users: 9, analyses: 20, interviews: 6, cvs: 12 },
+          previous: { new_users: 6, analyses: 25, interviews: 6, cvs: 10 },
+          funnel: { signed_up: 12, has_cv: 9, analyzed: 7, interviewed: 4, paid: 2, active_7d: 5 },
+        } });
+      }
+      if (path === "/admin/ai-usage") {
+        if (!isAdmin) return reply(route, 403, { error: "Chỉ tài khoản quản trị (Admin) mới có quyền truy cập trang thống kê này." });
+        const days = Number(url.searchParams.get("days") ?? 30);
+        const feature = (key: string, label: string, calls: number, tokens: number, cost: number) => ({
+          feature: key, label, calls, failed: 0, input_tokens: tokens * 0.8, output_tokens: tokens * 0.2, thought_tokens: 0, total_tokens: tokens, cost_vnd: cost, avg_cost_vnd: cost / calls,
+        });
+        return reply(route, 200, { report: {
+          days,
+          pricing: { inputUsdPerM: 0.5, outputUsdPerM: 3, usdVnd: 26000 },
+          totals: { calls: 40, failed: 1, input_tokens: 400000, output_tokens: 90000, thought_tokens: 10000, total_tokens: 500000, cost_vnd: 12990, avg_latency_ms: 3200 },
+          daily: Array.from({ length: days }, (_, index) => ({
+            day: new Date(Date.UTC(2026, 10, 14 - (days - 1 - index))).toISOString().slice(0, 10), total_tokens: 1000 * index, calls: index % 4, cost_vnd: 30 * index,
+          })),
+          by_feature: [feature("analysis", "Phân tích CV–JD", 20, 400000, 11000), feature("chat", "Trợ lý chat", 20, 100000, 1990)],
+          by_model: [{ model: "gemini-3.6-flash", calls: 40, failed: 1, input_tokens: 400000, output_tokens: 90000, thought_tokens: 10000, total_tokens: 500000, cost_vnd: 12990 }],
+          top_users: [{ id: OLDER_USER_ID, user_code: "12345678", email: "older@example.com", full_name: "Người Dùng Cũ", calls: 12, total_tokens: 200000, cost_vnd: 5200 }],
+        } });
+      }
+      if (path === `/admin/users/${OLDER_USER_ID}`) {
+        return reply(route, 200, { detail: {
+          user: { id: OLDER_USER_ID, user_code: "12345678", email: "older@example.com", full_name: "Người Dùng Cũ", phone: "", credits: 1, is_admin: false, created_at: "2025-01-01T00:00:00.000Z" },
+          counts: { cvs: 3, analyses: 5, interviews: 2, transactions_success: 1 },
+          recent_analyses: [{ id: ANALYSIS_ID, rci_score: 75, created_at: "2026-10-02T00:00:00.000Z" }],
+          transactions: [{ order_code: 9001, amount: 29000, status: "SUCCESS", created_at: "2026-11-06T00:00:00.000Z" }],
+          ai_30d: { calls: 12, total_tokens: 200000, cost_vnd: 5200 },
+        } });
+      }
+      if (path === "/admin/transactions") {
+        const status = url.searchParams.get("status");
+        const all = [
+          { order_code: 9001, amount: 29000, status: "SUCCESS", created_at: "2026-11-06T00:00:00.000Z", user_email: EMAIL, user_code: "81047992" },
+          { order_code: 9002, amount: 29000, status: "PENDING", created_at: "2026-11-07T00:00:00.000Z", user_email: "older@example.com", user_code: "12345678" },
+        ];
+        const transactions = all.filter((tx) => !status || tx.status === status);
+        return reply(route, 200, { transactions, total: transactions.length, page: 1, page_size: 20 });
+      }
+      if (path === "/admin/jobs") {
+        return reply(route, 200, { stats: {
+          active: 35, inactive: 4, last_seen_at: "2026-11-14T00:00:00.000Z",
+          by_source: [{ source: "greenhouse", active: 25 }, { source: "lever", active: 10 }],
+          by_category: [{ category: "backend", label: "Lập trình Backend", active: 20 }, { category: "ui_ux", label: "Thiết kế UI/UX", active: 15 }],
+        } });
+      }
       if (path === "/cv") {
         // Two saved CVs, one per page, so the history can page through them.
         const cvs = !savedCvs ? [] : page === "1"
@@ -228,8 +296,10 @@ async function mockServices(context: BrowserContext, { jobsStatus = 200, savedCv
           return reply(route, jobsStatus, { error: "Kho việc làm chưa sẵn sàng. Hãy chạy migration 004_job_postings.sql rồi chạy npm run jobs:sync." });
         }
         const onlySaved = url.searchParams.get("saved") === "1";
-        const jobs = onlySaved ? [JOB].filter((j) => savedJobIds.includes(j.id)) : [JOB];
-        return reply(route, 200, { jobs, total: jobs.length, page: 1, page_size: 20, saved_ids: savedJobIds });
+        const category = url.searchParams.get("category");
+        const jobs = [JOB].filter((j) => (!onlySaved || savedJobIds.includes(j.id))
+          && (!category || j.category === category || GROUP_OF[j.category] === category));
+        return reply(route, 200, { jobs, total: jobs.length, page: 1, page_size: 24, saved_ids: savedJobIds, category_groups: JOB_CATEGORY_GROUPS });
       }
       if (path === `/jobs/${JOB_ID}/save`) {
         if (method === "POST") {
@@ -600,22 +670,52 @@ test("an interviewer follow-up can be answered and the earlier attempt stays vis
   expect(unexpected).toEqual([]);
 });
 
-test("admin overview is hidden from regular users and visible to verified admins", async ({ page, context }) => {
+test("the admin area is refused to regular users and opens from the account menu for admins", async ({ page, context }) => {
   await mockServices(context, { isAdmin: false });
   await signIn(page);
-  await expect(page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Quản trị" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Menu tài khoản" }).click();
+  await expect(page.getByRole("menuitem", { name: "Trang quản trị" })).toHaveCount(0);
   await page.goto("/admin");
   await expect(page.getByRole("status")).toContainText("Chỉ tài khoản quản trị (Admin) mới có quyền truy cập");
+  await expect(page.getByRole("navigation", { name: "Quản trị" })).toHaveCount(0);
 
-  await mockServices(context, { isAdmin: true });
-  await page.goto("/");
-  const adminLink = page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Quản trị" });
-  await expect(adminLink).toBeVisible();
-  await adminLink.click();
+  const { unexpected } = await mockServices(context, { isAdmin: true });
+  await page.goto("/jobs");
+  // Admins keep the same app navigation as everyone else; the admin area opens from the account menu.
+  await expect(page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Quản trị" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Menu tài khoản" }).click();
+  await page.getByRole("menuitem", { name: "Trang quản trị" }).click();
   await expect(page).toHaveURL(/\/admin$/);
-  await expect(page.getByRole("heading", { name: "Thống kê tổng quan hệ thống" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tổng quan", level: 1 })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Điều hướng chính" })).toHaveCount(0);
   await expect(page.getByText("87.000đ")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Phễu chuyển đổi" })).toContainText("Đã phân tích CV–JD");
+  await expect(page.getByRole("region", { name: "Hoạt động theo ngày" })).toBeVisible();
+  // New users went from 6 to 9 against the previous period.
+  await expect(page.locator(".admin-delta").first()).toContainText("50%");
+
+  const admin = page.getByRole("navigation", { name: "Quản trị" });
+  await admin.getByRole("link", { name: "AI & Chi phí" }).click();
+  await expect(page.getByRole("region", { name: "Theo tính năng" })).toContainText("Phân tích CV–JD");
+  await expect(page.locator(".admin-kpi", { hasText: "Chi phí ước tính" })).toContainText("12.990đ");
+
+  await admin.getByRole("link", { name: "Doanh thu" }).click();
+  const transactions = page.getByRole("region", { name: "Danh sách giao dịch" });
+  await expect(transactions).toContainText("#9002");
+  await page.getByRole("button", { name: "Thành công", exact: true }).click();
+  await expect(transactions).not.toContainText("#9002");
+  await expect(transactions).toContainText("#9001");
+
+  await admin.getByRole("link", { name: "Kho việc làm" }).click();
+  await expect(page.getByRole("region", { name: "Theo nguồn" })).toContainText("Greenhouse");
+
+  await admin.getByRole("link", { name: "Hệ thống" }).click();
   await expect(page.getByText("Quản trị viên (1/3)")).toBeVisible();
+
+  await page.getByRole("link", { name: "← Về ứng dụng" }).first().click();
+  await expect(page).toHaveURL(/\/jobs$/);
+  await expect(page.getByRole("navigation", { name: "Điều hướng chính" })).toBeVisible();
+  expect(unexpected).toEqual([]);
 });
 
 test("account menu displays User ID under the name, opens profile to edit info & password, and places sign-out at the bottom", async ({ page, context }) => {
@@ -815,18 +915,26 @@ for (const path of ["/jobs", "/profile"]) {
 test("the admin user list is searched by the server, so older accounts can be found", async ({ page, context }) => {
   const { unexpected } = await mockServices(context, { isAdmin: true });
   await signIn(page);
-  await page.goto("/admin");
+  await page.goto("/admin/users");
   const list = page.getByRole("region", { name: "Danh sách người dùng" });
-  await expect(list).toContainText("Danh sách người dùng hệ thống (2)");
+  await expect(list).toContainText("2 tài khoản");
   await expect(list).toContainText("older@example.com");
 
   const searched = page.waitForRequest((request) => request.url().includes("/api/admin/users") && request.url().includes("q=12345678"));
   await page.getByLabel("Tìm người dùng").fill("12345678");
   await page.getByRole("button", { name: "Tìm", exact: true }).click();
   await searched;
-  await expect(list).toContainText("Kết quả tìm “12345678” (1)");
+  await expect(list).toContainText("Kết quả tìm “12345678”");
+  await expect(list).toContainText("1 tài khoản");
   await expect(list).toContainText("Người Dùng Cũ");
   await expect(list).not.toContainText("Flow Demo");
+
+  await list.getByRole("button", { name: "Xem chi tiết older@example.com" }).click();
+  const drawer = page.getByRole("dialog", { name: "Chi tiết người dùng" });
+  await expect(drawer).toContainText("12345678");
+  await expect(drawer).toContainText("5.200đ");
+  await page.keyboard.press("Escape");
+  await expect(drawer).toHaveCount(0);
 
   await page.getByLabel("Tìm người dùng").fill("khong-co-ai");
   await page.getByRole("button", { name: "Tìm", exact: true }).click();
@@ -838,9 +946,43 @@ test("/admin fits a phone screen", async ({ page, context }) => {
   await mockServices(context, { isAdmin: true });
   await signIn(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/admin");
+  for (const path of ["/admin", "/admin/users", "/admin/ai", "/admin/revenue"]) {
+    await page.goto(path);
+    await expect(page.getByRole("navigation", { name: "Quản trị" })).toBeVisible();
+    await expect(page.locator(".admin-kpi, .admin-card").first()).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), path).toBe(true);
+  }
+  await page.goto("/admin/users");
   await expect(page.getByLabel("Tìm người dùng")).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("the occupation list sits left of the search box, lists empty occupations and filters by one occupation or a whole group", async ({ page, context }) => {
+  const { unexpected } = await mockServices(context);
+  await signIn(page);
+  await page.goto("/jobs");
+  const occupation = page.getByLabel("Ngành nghề");
+  const search = page.getByLabel("Tìm việc làm");
+  const [occupationBox, searchBox] = [await occupation.boundingBox(), await search.boundingBox()];
+  expect(occupationBox!.x + occupationBox!.width).toBeLessThanOrEqual(searchBox!.x);
+  await expect(occupation).toHaveValue("");
+  await expect(occupation.locator("option", { hasText: "Phát triển game (chưa có tin)" })).toHaveCount(1);
+  await expect(page.locator(".job-card .job-category-tag")).toHaveText("Lập trình Backend");
+
+  const filtered = (value: string) => page.waitForRequest((request) => new URL(request.url()).searchParams.get("category") === value);
+  let request = filtered("game");
+  await occupation.selectOption("game");
+  await request;
+  await expect(page.getByRole("heading", { name: "Backend Engineer" })).toHaveCount(0);
+  await expect(page.getByText("Chưa có tin tuyển dụng nào cho ngành")).toContainText("Phát triển game");
+
+  request = filtered("group-it");
+  await occupation.selectOption("group-it");
+  await request;
+  await expect(page.getByRole("heading", { name: "Backend Engineer" })).toBeVisible();
+
+  await occupation.selectOption("");
+  await expect(page.getByRole("heading", { name: "Backend Engineer" })).toBeVisible();
+  expect(unexpected).toEqual([]);
 });
 
 test("the job list is the home page: / and the logo open /jobs, and an old job link still opens the analysis form", async ({ page, context }) => {

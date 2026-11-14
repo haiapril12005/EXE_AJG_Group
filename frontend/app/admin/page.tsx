@@ -1,336 +1,149 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api } from "../../utils/api";
-import { formatUserCode, useApp } from "../app-frame";
+import { useState } from "react";
+import {
+  AdminCard, AdminNotice, AdminPageHeader, BarList, changeOf, DailyBarChart, fmtDateTime, fmtNumber, fmtPercent, fmtVnd,
+  KpiCard, PeriodPicker, RefreshButton, useAdminData, type Period
+} from "./admin-ui";
+import type { AdminActivity, AdminOverview } from "./types";
 
-type AdminUserSummary = {
-  id: string;
-  user_code?: string;
-  email: string;
-  full_name: string;
-  created_at: string;
-};
+const METRICS = [
+  { key: "new_users", label: "Đăng ký mới" },
+  { key: "analyses", label: "Lượt phân tích" },
+  { key: "interviews", label: "Phỏng vấn AI" },
+  { key: "cvs", label: "CV mới" }
+] as const;
 
-type AdminUserRow = {
-  id: string;
-  user_code?: string;
-  email: string;
-  full_name: string;
-  credits: number;
-  is_admin: boolean;
-  created_at: string;
-};
+export default function AdminOverviewPage() {
+  const [days, setDays] = useState<Period>(30);
+  const [metric, setMetric] = useState<(typeof METRICS)[number]["key"]>("new_users");
+  const overview = useAdminData<{ overview: AdminOverview }>("/admin/overview");
+  // The activity charts need migration 011; until then the page still shows the overview figures.
+  const activity = useAdminData<{ activity: AdminActivity }>(overview.data ? `/admin/activity?days=${days}` : null);
+  const o = overview.data?.overview;
+  const a = activity.data?.activity;
 
-type AdminTransactionItem = {
-  order_code: number;
-  amount: number;
-  status: "PENDING" | "SUCCESS" | "CANCELLED";
-  created_at: string;
-  user_email: string | null;
-};
-
-type AdminOverview = {
-  generated_at: string;
-  rules: {
-    max_admins: number;
-    current_admins: number;
-    remaining_slots: number;
-  };
-  users: {
-    total: number;
-    admins: number;
-    new_last_7d: number;
-    total_credits: number;
-  };
-  cvs: {
-    total: number;
-    evaluations_total: number;
-    avg_quality_score: number | null;
-  };
-  analyses: {
-    total: number;
-    avg_rci_score: number | null;
-    high_match_count: number;
-  };
-  interviews: {
-    total: number;
-    completed: number;
-    in_progress: number;
-    answers_total: number;
-  };
-  revenue: {
-    total_vnd: number;
-    success_count: number;
-    pending_count: number;
-    cancelled_count: number;
-    recent_transactions: AdminTransactionItem[];
-  };
-  jobs: {
-    active_count: number;
-    last_seen_at: string | null;
-  };
-  admins: AdminUserSummary[];
-};
-
-type UserPage = { users: AdminUserRow[]; total: number; page: number; page_size: number };
-
-const shortDateTime = (value: string) =>
-  new Date(value).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" });
-
-const TX_STATUS_LABELS: Record<AdminTransactionItem["status"], string> = {
-  SUCCESS: "Thành công",
-  PENDING: "Đang chờ",
-  CANCELLED: "Đã hủy"
-};
-
-export default function AdminPage() {
-  const { token } = useApp();
-  const [overview, setOverview] = useState<AdminOverview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  // The user list is searched and paged by the server, so every account can be found, not only recent ones.
-  const [users, setUsers] = useState<UserPage | null>(null);
-  const [usersLoading, setUsersLoading] = useState(false);
-  const [usersError, setUsersError] = useState("");
-  const [searchDraft, setSearchDraft] = useState("");
-  const [query, setQuery] = useState("");
-  const [userPage, setUserPage] = useState(1);
-  const [usersVersion, setUsersVersion] = useState(0);
-  const canListUsers = overview !== null;
-
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const result = await api<{ overview: AdminOverview }>("/admin/overview", token);
-      setOverview(result.overview);
-    } catch (err) {
-      setOverview(null);
-      setError(err instanceof Error ? err.message : "Không thể tải dữ liệu quản trị.");
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    void loadOverview();
-  }, [loadOverview]);
-
-  useEffect(() => {
-    // The overview proves admin access first; a refused overview needs no second refused request.
-    if (!canListUsers) return;
-    let active = true;
-    setUsersLoading(true);
-    setUsersError("");
-    const params = new URLSearchParams({ page: String(userPage) });
-    if (query) params.set("q", query);
-    void api<UserPage>(`/admin/users?${params}`, token).then((result) => {
-      if (active) setUsers(result);
-    }).catch((err: Error) => {
-      if (active) setUsersError(err.message);
-    }).finally(() => {
-      if (active) setUsersLoading(false);
-    });
-    return () => { active = false; };
-    // A refreshed token does not change the list.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canListUsers, query, userPage, usersVersion]);
-
-  function searchUsers(event: FormEvent) {
-    event.preventDefault();
-    setUserPage(1);
-    setQuery(searchDraft.trim());
+  function refresh() {
+    overview.reload();
+    activity.reload();
   }
 
-  function refreshAll() {
-    void loadOverview();
-    setUsersVersion((version) => version + 1);
+  if (overview.error) {
+    return (
+      <>
+        <AdminPageHeader title="Tổng quan" />
+        <AdminNotice>{overview.error}</AdminNotice>
+        <p className="muted-copy">Quyền quản trị chỉ được cấp qua lệnh CLI với khóa bí mật máy chủ, cho tài khoản đã xác thực email và tối đa 3 tài khoản.</p>
+        <Link href="/jobs" className="inline-link">← Về ứng dụng</Link>
+      </>
+    );
   }
 
-  const lastUserPage = users ? Math.max(1, Math.ceil(users.total / users.page_size)) : 1;
+  const metricLabel = METRICS.find((item) => item.key === metric)!.label;
+  const funnelSteps = a ? [
+    { key: "signed_up", label: "Đăng ký tài khoản", value: a.funnel.signed_up },
+    { key: "has_cv", label: "Có ít nhất 1 CV", value: a.funnel.has_cv },
+    { key: "analyzed", label: "Đã phân tích CV–JD", value: a.funnel.analyzed },
+    { key: "interviewed", label: "Đã luyện phỏng vấn", value: a.funnel.interviewed },
+    { key: "paid", label: "Đã thanh toán", value: a.funnel.paid }
+  ] : [];
 
   return (
     <>
-      <section className="page-heading admin-heading">
-        <div>
-          <p className="eyebrow">BẢNG ĐIỀU KHIỂN QUẢN TRỊ</p>
-          <h1>Thống kê tổng quan hệ thống</h1>
-          <p>Theo dõi người dùng, hồ sơ CV, lượt phân tích AI, phiên phỏng vấn và doanh thu PayOS.</p>
-        </div>
-        {overview && (
-          <button type="button" className="secondary-button admin-refresh" disabled={loading} onClick={refreshAll}>
-            {loading ? "Đang cập nhật..." : "↻ Làm mới số liệu"}
-          </button>
-        )}
-      </section>
+      <AdminPageHeader
+        title="Tổng quan"
+        description={o ? `Cập nhật lúc ${fmtDateTime(o.generated_at)}` : "Đang tải số liệu..."}
+        actions={<><PeriodPicker value={days} onChange={setDays} /><RefreshButton loading={overview.loading || activity.loading} onClick={refresh} /></>}
+      />
 
-      {error && (
-        <section className="soft-card input-card admin-denied">
-          <p role="status" className="notice notice-info">{error}</p>
-          <p className="muted-copy">
-            Quyền quản trị chỉ được cấp qua lệnh CLI với khóa bí mật máy chủ cho tài khoản đã xác thực email (OTP) và giới hạn tối đa 3 tài khoản Admin.
-          </p>
-          <Link href="/analyze" className="inline-link">← Về trang phân tích</Link>
+      {o && (
+        <section className="admin-kpi-row" aria-label="Chỉ số chính">
+          <KpiCard
+            label="Người dùng"
+            value={fmtNumber(o.users.total)}
+            change={a ? changeOf(a.current.new_users, a.previous.new_users) : undefined}
+            hint={a ? `+${fmtNumber(a.current.new_users)} trong ${days} ngày` : `+${o.users.new_last_7d} trong 7 ngày`}
+          />
+          <KpiCard
+            label="Hoạt động 7 ngày"
+            value={a ? fmtNumber(a.funnel.active_7d) : "—"}
+            hint={a ? `${fmtPercent(a.funnel.active_7d, o.users.total)} tổng người dùng` : "Cần migration 011"}
+          />
+          <KpiCard
+            label={`Phân tích (${days} ngày)`}
+            value={a ? fmtNumber(a.current.analyses) : fmtNumber(o.analyses.total)}
+            change={a ? changeOf(a.current.analyses, a.previous.analyses) : undefined}
+            hint={`Tổng ${fmtNumber(o.analyses.total)} · RCI TB ${o.analyses.avg_rci_score ?? "—"}%`}
+          />
+          <KpiCard
+            label="Doanh thu"
+            value={fmtVnd(o.revenue.total_vnd)}
+            hint={`${o.revenue.success_count} giao dịch thành công`}
+          />
         </section>
       )}
 
-      {loading && !overview && !error && <p className="muted-copy">Đang tải số liệu quản trị...</p>}
+      {activity.error && <AdminNotice>{activity.error}</AdminNotice>}
 
-      {overview && (
-        <>
-          <section className="admin-kpi-grid" aria-label="Chỉ số tổng quan">
-            <article className="soft-card admin-kpi-card">
-              <span className="eyebrow">NGƯỜI DÙNG</span>
-              <strong className="admin-kpi-value">{overview.users.total.toLocaleString("vi-VN")}</strong>
-              <p className="admin-kpi-meta">
-                +{overview.users.new_last_7d} mới trong 7 ngày · {overview.users.total_credits.toLocaleString("vi-VN")} credits
-              </p>
-            </article>
-
-            <article className="soft-card admin-kpi-card">
-              <span className="eyebrow">HỒ SƠ CV</span>
-              <strong className="admin-kpi-value">{overview.cvs.total.toLocaleString("vi-VN")}</strong>
-              <p className="admin-kpi-meta">
-                {overview.cvs.evaluations_total} lượt chấm chất lượng · TB {overview.cvs.avg_quality_score !== null ? `${overview.cvs.avg_quality_score}/100` : "—"}
-              </p>
-            </article>
-
-            <article className="soft-card admin-kpi-card">
-              <span className="eyebrow">LƯỢT PHÂN TÍCH CV–JD</span>
-              <strong className="admin-kpi-value">{overview.analyses.total.toLocaleString("vi-VN")}</strong>
-              <p className="admin-kpi-meta">
-                Điểm RCI TB: {overview.analyses.avg_rci_score !== null ? `${overview.analyses.avg_rci_score}%` : "—"} · {overview.analyses.high_match_count} lượt ≥ 70%
-              </p>
-            </article>
-
-            <article className="soft-card admin-kpi-card">
-              <span className="eyebrow">PHỎNG VẤN AI</span>
-              <strong className="admin-kpi-value">{overview.interviews.total.toLocaleString("vi-VN")}</strong>
-              <p className="admin-kpi-meta">
-                {overview.interviews.completed} hoàn thành · {overview.interviews.in_progress} đang luyện · {overview.interviews.answers_total} câu trả lời
-              </p>
-            </article>
-
-            <article className="soft-card admin-kpi-card">
-              <span className="eyebrow">DOANH THU PAYOS</span>
-              <strong className="admin-kpi-value">{overview.revenue.total_vnd.toLocaleString("vi-VN")}đ</strong>
-              <p className="admin-kpi-meta">
-                {overview.revenue.success_count} thành công · {overview.revenue.pending_count} đang chờ · {overview.revenue.cancelled_count} đã hủy
-              </p>
-            </article>
-
-            <article className="soft-card admin-kpi-card">
-              <span className="eyebrow">KHO VIỆC LÀM</span>
-              <strong className="admin-kpi-value">{overview.jobs.active_count.toLocaleString("vi-VN")}</strong>
-              <p className="admin-kpi-meta">
-                {overview.jobs.last_seen_at ? `Đồng bộ lúc ${shortDateTime(overview.jobs.last_seen_at)}` : "Chưa đồng bộ việc làm"}
-              </p>
-            </article>
-          </section>
-
-          <div className="history-grid history-grid-wide">
-            <section className="soft-card">
-              <h3>Giao dịch PayOS gần đây</h3>
-              {overview.revenue.recent_transactions.length > 0 ? (
-                <div className="admin-list">
-                  {overview.revenue.recent_transactions.map((tx) => (
-                    <div key={tx.order_code} className="history-item admin-tx-item">
-                      <div>
-                        <strong>#{tx.order_code} · {tx.amount.toLocaleString("vi-VN")}đ</strong>
-                        <small className="admin-subline">{tx.user_email || "Người dùng"} · {shortDateTime(tx.created_at)}</small>
-                      </div>
-                      <span className={`admin-badge admin-badge-${tx.status.toLowerCase()}`}>
-                        {TX_STATUS_LABELS[tx.status]}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="empty-copy">Chưa phát sinh giao dịch thanh toán nào.</p>
-              )}
-            </section>
-
-            <section className="soft-card">
-              <h3>Quản trị viên ({overview.rules.current_admins}/{overview.rules.max_admins})</h3>
-              <div className="admin-list">
-                {overview.admins.map((admin) => {
-                  const code = admin.user_code || formatUserCode(admin.id);
-                  return (
-                    <div key={admin.id} className="history-item">
-                      <div>
-                        <strong>{admin.full_name || "Quản trị viên"} · <code className="profile-id-code">ID: {code}</code></strong>
-                        <small className="admin-subline">{admin.email}</small>
-                      </div>
-                      <small>{new Date(admin.created_at).toLocaleDateString("vi-VN")}</small>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="scoring-breakdown admin-rules-box">
-                <strong>Quy tắc bảo mật cấp quyền Admin</strong>
-                <p><span>1. Xác thực tài khoản</span><b>Bắt buộc đã xác nhận OTP email</b></p>
-                <p><span>2. Giới hạn số lượng</span><b>Tối đa {overview.rules.max_admins} Admin (còn trống {overview.rules.remaining_slots})</b></p>
-                <p><span>3. Phương thức cấp quyền</span><b>Chỉ qua CLI/SQL bằng Secret Key</b></p>
-                <small>
-                  Lệnh gán quyền (theo Email hoặc Mã ID 8 số): <code>npm.cmd run admin:grant -- &lt;email_hoặc_mã_ID&gt;</code> · Thu hồi: <code>npm.cmd run admin:revoke -- &lt;email_hoặc_mã_ID&gt;</code>
-                </small>
-              </div>
-            </section>
-
-            <section className="soft-card admin-span-full" aria-label="Danh sách người dùng">
-              <div className="admin-users-header">
-                <h3>
-                  {query ? `Kết quả tìm “${query}”` : "Danh sách người dùng hệ thống"} ({(users?.total ?? (query ? 0 : overview.users.total)).toLocaleString("vi-VN")})
-                </h3>
-                <form className="admin-user-search-form" role="search" onSubmit={searchUsers}>
-                  <input
-                    type="search"
-                    className="form-input admin-user-search"
-                    aria-label="Tìm người dùng"
-                    placeholder="Tìm theo mã ID (8 số), email hoặc họ tên..."
-                    maxLength={100}
-                    value={searchDraft}
-                    onChange={(event) => setSearchDraft(event.target.value)}
-                  />
-                  <button type="submit" className="secondary-button admin-search-button" disabled={usersLoading}>Tìm</button>
-                </form>
-              </div>
-              {usersError && <p role="status" className="notice notice-info">{usersError}</p>}
-              {usersLoading && !users && <p className="muted-copy">Đang tải danh sách người dùng...</p>}
-              {users && users.users.length === 0 && (
-                <p className="empty-copy">{query ? `Không tìm thấy người dùng khớp “${query}”.` : "Chưa có người dùng nào."}</p>
-              )}
-              <div className="admin-list" aria-busy={usersLoading}>
-                {users?.users.map((user) => (
-                  <div key={user.id} className="history-item admin-tx-item">
-                    <div>
-                      <strong>
-                        <code className="profile-id-code">ID: {user.user_code || formatUserCode(user.id)}</code> · {user.full_name || "Chưa đặt tên"} · <span className="muted-copy">{user.email}</span>
-                      </strong>
-                      <small className="admin-subline">
-                        Credits: {user.credits} · Tạo ngày {new Date(user.created_at).toLocaleDateString("vi-VN")}
-                      </small>
-                    </div>
-                    <span className={`admin-badge ${user.is_admin ? "admin-badge-success" : "admin-badge-neutral"}`}>
-                      {user.is_admin ? "ADMIN" : "USER"}
-                    </span>
-                  </div>
+      {a && (
+        <div className="admin-grid-2-1">
+          <AdminCard
+            title="Hoạt động theo ngày"
+            description={`${metricLabel} trong ${days} ngày qua`}
+            actions={
+              <div className="admin-segmented admin-segmented-sm" role="group" aria-label="Chỉ số biểu đồ">
+                {METRICS.map((item) => (
+                  <button key={item.key} type="button" className={metric === item.key ? "is-active" : ""} aria-pressed={metric === item.key} onClick={() => setMetric(item.key)}>
+                    {item.label}
+                  </button>
                 ))}
               </div>
-              {users && lastUserPage > 1 && (
-                <nav className="job-pager" aria-label="Phân trang người dùng">
-                  <button type="button" className="secondary-button" disabled={userPage <= 1 || usersLoading} onClick={() => setUserPage(userPage - 1)}>← Trước</button>
-                  <span>Trang {userPage}/{lastUserPage}</span>
-                  <button type="button" className="secondary-button" disabled={userPage >= lastUserPage || usersLoading} onClick={() => setUserPage(userPage + 1)}>Sau →</button>
-                </nav>
-              )}
-            </section>
-          </div>
-        </>
+            }
+          >
+            <DailyBarChart label={metricLabel} data={a.daily.map((row) => ({ day: row.day, value: row[metric] }))} />
+          </AdminCard>
+
+          <AdminCard title="Phễu chuyển đổi" description="Số người dùng đã đi tới từng bước (toàn thời gian)">
+            <BarList
+              max={a.funnel.signed_up || 1}
+              items={funnelSteps.map((step, index) => ({
+                key: step.key,
+                label: <><span className="admin-step-index">{index + 1}</span>{step.label}</>,
+                value: step.value,
+                note: index === 0 ? undefined : fmtPercent(step.value, a.funnel.signed_up)
+              }))}
+            />
+            <p className="admin-footnote">Bước tụt mạnh nhất là chỗ nên cải thiện trải nghiệm trước.</p>
+          </AdminCard>
+        </div>
+      )}
+
+      {o && (
+        <div className="admin-grid-3">
+          <AdminCard title="Hồ sơ CV">
+            <dl className="admin-stats">
+              <div><dt>Tổng CV</dt><dd>{fmtNumber(o.cvs.total)}</dd></div>
+              <div><dt>Lượt chấm chất lượng</dt><dd>{fmtNumber(o.cvs.evaluations_total)}</dd></div>
+              <div><dt>Điểm chất lượng TB</dt><dd>{o.cvs.avg_quality_score !== null ? `${o.cvs.avg_quality_score}/100` : "—"}</dd></div>
+            </dl>
+          </AdminCard>
+          <AdminCard title="Phỏng vấn AI">
+            <dl className="admin-stats">
+              <div><dt>Tổng phiên</dt><dd>{fmtNumber(o.interviews.total)}</dd></div>
+              <div><dt>Hoàn thành</dt><dd>{fmtNumber(o.interviews.completed)} <small>({fmtPercent(o.interviews.completed, o.interviews.total)})</small></dd></div>
+              <div><dt>Câu trả lời</dt><dd>{fmtNumber(o.interviews.answers_total)}</dd></div>
+            </dl>
+          </AdminCard>
+          <AdminCard title="Phân tích CV–JD">
+            <dl className="admin-stats">
+              <div><dt>Tổng lượt</dt><dd>{fmtNumber(o.analyses.total)}</dd></div>
+              <div><dt>Phù hợp cao (≥ 70%)</dt><dd>{fmtNumber(o.analyses.high_match_count)} <small>({fmtPercent(o.analyses.high_match_count, o.analyses.total)})</small></dd></div>
+              <div><dt>Việc làm đang mở</dt><dd>{fmtNumber(o.jobs.active_count)}</dd></div>
+            </dl>
+          </AdminCard>
+        </div>
       )}
     </>
   );
 }
-
