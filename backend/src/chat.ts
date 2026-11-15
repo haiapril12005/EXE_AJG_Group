@@ -15,7 +15,7 @@ export const chatRequestSchema = z.object({
   page: z.string().regex(/^\/[a-z-]*$/u).max(40).optional()
 });
 
-export type ChatMessage = z.output<typeof chatRequestSchema>["messages"][number];
+type ChatMessage = z.output<typeof chatRequestSchema>["messages"][number];
 
 /** The assistant explains the website, so it needs no CV; a phone number typed into the chat is masked. */
 export function buildChatInput(messages: ChatMessage[], page: string | undefined) {
@@ -28,8 +28,8 @@ export function buildChatInput(messages: ChatMessage[], page: string | undefined
 export type ChatInput = ReturnType<typeof buildChatInput>;
 
 /** What the assistant may say about the site. Update this when a page or button changes. */
-export const SITE_GUIDE = `Trang chính là Việc làm (/jobs): đăng nhập xong hoặc bấm logo Job Ready đều mở trang này. Thanh trên cùng có các mục Việc làm, Phân tích, Tạo CV, Lịch sử; nút mặt trăng hoặc mặt trời đổi giao diện sáng/tối.
-Menu tài khoản: bấm vào avatar (chữ cái đầu của tên) ở góc trên bên phải. Menu có "Hồ sơ cá nhân", "Việc làm xem sau", "Lịch sử hoạt động" và "Đăng xuất". Menu cũng hiện mã ID 8 chữ số của tài khoản.
+export const SITE_GUIDE = `Trang chính là Việc làm (/jobs): đăng nhập xong hoặc bấm logo Job Ready đều mở trang này. Thanh trên cùng có các mục Việc làm, Phân tích, Tạo CV, Ảnh CV AI, Lịch sử, và nút "✦ Nâng cấp Pro" (hoặc nhãn PRO khi đã nâng cấp); nút mặt trăng hoặc mặt trời đổi giao diện sáng/tối.
+Menu tài khoản: bấm vào avatar (chữ cái đầu của tên) ở góc trên bên phải. Menu có "Hồ sơ cá nhân", "Gói & thanh toán", "Việc làm xem sau", "Lịch sử hoạt động" và "Đăng xuất". Menu cũng hiện mã ID 8 chữ số của tài khoản.
 Trang Phân tích (/analyze):
 - Bước 1, chọn CV: kéo thả hoặc chọn PDF tối đa 5 MB, chọn CV đã lưu, hoặc bấm "Hoặc tạo CV mới từ form". PDF dạng ảnh không có lớp văn bản sẽ không đọc được; khi đó hãy xuất lại PDF dạng văn bản. Email và số điện thoại được che trước khi gửi AI.
 - Bước 2, chọn JD: dán nội dung (50 đến 20.000 ký tự) hoặc chọn từ trang Việc làm.
@@ -39,6 +39,8 @@ Tạo và sửa CV (/create, /cv): chọn 1 trong ${CV_TEMPLATE_IDS.length} mẫ
 Việc làm (/jobs): tin tại Việt Nam từ trang tuyển dụng của công ty. Tìm theo vị trí, công ty hoặc kỹ năng, lọc theo khu vực. Mỗi tin có "Phân tích với CV của tôi", "Xem mô tả", "☆ Lưu xem sau" và "Tin gốc".
 Xem sau: các tin đã lưu nằm ở tab "★ Xem sau · Đã lưu" trong trang Việc làm, hoặc mục "Việc làm xem sau" trong menu tài khoản. Bấm "★ Đã lưu" để bỏ lưu. Danh sách gắn với tài khoản, đăng nhập lại vẫn còn.
 Luyện phỏng vấn (/interview): bấm "Nghe câu hỏi", rồi "Thu âm câu trả lời" (tối đa 90 giây, cần cấp quyền microphone) hoặc gõ câu trả lời; sửa bản chép lời rồi bấm "Nộp và nhận đánh giá" (tối thiểu 20 ký tự). Có thể "Trả lời lại" và trả lời câu hỏi nối tiếp.
+Gói Pro (/pricing): Miễn phí (3 phân tích, 1 phỏng vấn, 1 ảnh AI mỗi 30 ngày), Pro 1 tháng 29.000đ (30 phân tích, 10 phỏng vấn, 10 ảnh AI) và Pro 3 tháng 59.000đ (100, 30, 30). Thanh toán bằng QR ngân hàng ở trang /checkout; mua thêm khi đang Pro sẽ cộng dồn ngày. Gói, hạn dùng và số lượt còn lại xem ở thẻ "Gói & hạn mức" trong Hồ sơ cá nhân.
+Ảnh CV AI (/photo-studio): tải ảnh chân dung của chính mình, xác nhận đồng ý, chọn ngành ứng tuyển và phông nền rồi bấm "Tạo 4 phương án"; AI giữ nguyên khuôn mặt, chỉ thay trang phục và nền. Chọn một ảnh rồi tải về hoặc thêm vào CV bằng nút "＋ Ảnh 3x4".
 Lịch sử (/history): xem CV, báo cáo, lần đánh giá và phiên phỏng vấn. Xóa một CV cũng xóa các báo cáo, lần đánh giá và phiên phỏng vấn của CV đó, không thể hoàn tác.
 Hồ sơ cá nhân (/profile, mở từ menu tài khoản):
 - "Thông tin cá nhân": sửa họ tên và số điện thoại Việt Nam (ví dụ 0912345678), rồi bấm "Lưu thông tin cá nhân".

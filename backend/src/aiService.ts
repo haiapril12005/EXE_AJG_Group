@@ -21,7 +21,7 @@ const looseEvidenceSchema = z.object({
   quote: z.string()
 });
 
-export const analysisResultSchema = z.object({
+const analysisResultSchema = z.object({
   requirements: z.array(z.object({
     category: z.string(),
     jd_quote: z.string(),
@@ -41,8 +41,6 @@ export const analysisResultSchema = z.object({
   }),
   layer_4_mock: z.array(z.string())
 });
-
-export type AnalysisResult = z.infer<typeof analysisResultSchema>;
 
 const evidenceItem = {
   type: "object",
@@ -315,7 +313,7 @@ export const rewriteSectionSchema = z.object({
   ai_suggestion: z.string().trim().min(1).max(2000)
 });
 
-export type RewriteSectionInput = z.output<typeof rewriteSectionSchema>;
+type RewriteSectionInput = z.output<typeof rewriteSectionSchema>;
 
 export async function rewriteSection(input: RewriteSectionInput): Promise<string> {
   const systemInstruction = `Bạn là chuyên gia viết CV. Viết lại phần mô tả để làm nổi bật gợi ý cải thiện sao cho khớp với JD.
@@ -441,7 +439,7 @@ const interviewFeedbackSchema = z.object({
     .transform((value) => value && value.trim().length >= 10 && value.trim().length <= 500 ? value.trim() : null)
 });
 
-export type InterviewFeedback = z.output<typeof interviewFeedbackSchema>;
+type InterviewFeedback = z.output<typeof interviewFeedbackSchema>;
 
 export async function evaluateInterviewAnswer(input: {
   question: string; answer: string; cvText: string; jdText: string;

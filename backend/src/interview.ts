@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Quick practice offers these session lengths; a session built from an analysis keeps its 3. */
-export const QUESTION_COUNTS = [3, 5] as const;
+const QUESTION_COUNTS = [3, 5] as const;
 export const MAX_QUESTIONS = 5;
 /** Older attempts beyond this are dropped so a row stays small. */
 export const MAX_PREVIOUS_ATTEMPTS = 5;

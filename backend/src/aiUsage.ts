@@ -27,7 +27,7 @@ export const AI_FEATURES = {
   other: "Khác"
 } as const;
 
-export type AiFeature = keyof typeof AI_FEATURES;
+type AiFeature = keyof typeof AI_FEATURES;
 
 /** The feature an API path belongs to (paths as the router sees them, without the /api prefix). */
 export function featureOf(method: string, path: string): AiFeature {
@@ -44,7 +44,7 @@ export function featureOf(method: string, path: string): AiFeature {
   return "other";
 }
 
-export type TokenUsage = { input: number; output: number; thought: number; total: number };
+type TokenUsage = { input: number; output: number; thought: number; total: number };
 
 /** Token counts from a Gemini interaction result; missing fields count as zero. */
 export function tokensOf(result: unknown): TokenUsage {

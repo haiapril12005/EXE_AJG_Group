@@ -29,7 +29,7 @@ export type Analysis = {
   requirements?: Requirement[];
 };
 
-export type Requirement = { category: "skills" | "experience" | "education"; jd_quote: string; cv_quote: string | null; matched: boolean };
+type Requirement = { category: "skills" | "experience" | "education"; jd_quote: string; cv_quote: string | null; matched: boolean };
 
 export type QualityEvaluation = {
   id?: string;

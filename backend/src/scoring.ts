@@ -1,17 +1,16 @@
-export const SCORING_WEIGHTS = {
+const SCORING_WEIGHTS = {
   skills: 45,
   experience: 35,
   education: 20
 } as const;
 
-export type RequirementCategory = keyof typeof SCORING_WEIGHTS;
-export type GroundedRequirement = {
+type RequirementCategory = keyof typeof SCORING_WEIGHTS;
+type ScoredRequirement = {
   category: RequirementCategory;
   jd_quote: string;
   cv_quote: string | null;
+  matched: boolean;
 };
-
-export type ScoredRequirement = GroundedRequirement & { matched: boolean };
 export type ScoringBreakdown = {
   category: RequirementCategory;
   weight: number;
@@ -46,7 +45,7 @@ export function assertStructuredCvGrounded(source: string, values: string[]): vo
 }
 
 /** What the AI returns before any of it is checked against the documents. */
-export type RawRequirement = { category: string; jd_quote: string; cv_quote: string | null };
+type RawRequirement = { category: string; jd_quote: string; cv_quote: string | null };
 
 const MAX_REQUIREMENTS = 20;
 const MAX_QUOTE_LENGTH = 400;
@@ -61,7 +60,7 @@ function isCategory(value: string): value is RequirementCategory {
  * found in the CV as unmet. A mistake by the AI can therefore lower the score but never raise it,
  * and one bad quote no longer throws the whole analysis away.
  */
-export function groundRequirements(requirements: RawRequirement[], cvText: string, jdText: string) {
+function groundRequirements(requirements: RawRequirement[], cvText: string, jdText: string) {
   const grounded: ScoredRequirement[] = [];
   const byQuote = new Map<string, ScoredRequirement>();
   let unverified = 0;

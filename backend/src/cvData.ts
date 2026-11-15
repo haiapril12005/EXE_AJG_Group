@@ -12,7 +12,8 @@ export const imageDataUrlSchema = z.string()
 export const CV_TEMPLATE_IDS = [
   "modern", "classic", "minimal", "creative", "executive", "compact",
   "elegant", "tech", "timeline", "bold", "pastel", "ats",
-  "corporate", "consultant", "formal", "monogram", "slate"
+  "corporate", "consultant", "formal", "monogram", "slate",
+  "aurora", "duotone", "editorial", "outline", "academic", "coral", "skyline", "ivory"
 ] as const;
 
 export const cvDataSchema = z.object({

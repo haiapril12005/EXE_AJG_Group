@@ -332,12 +332,17 @@ async function mockServices(context: BrowserContext, { jobsStatus = 200, savedCv
   return { posts, unexpected, verifications };
 }
 
-async function signIn(page: Page) {
+async function signIn(page: Page, { admin = false } = {}) {
   await page.goto("/");
   await page.getByLabel("Email", { exact: true }).fill(EMAIL);
   await page.getByLabel("Mật khẩu", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
   await expect(page.getByRole("button", { name: "Menu tài khoản" })).toBeVisible();
+  // Admins land on the admin area.
+  if (admin) {
+    await expect(page).toHaveURL(/\/admin$/);
+    return;
+  }
   // Signing in opens the job list; these tests start from the analysis page.
   await expect(page).toHaveURL(/\/jobs$/);
   await page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Phân tích" }).click();
@@ -549,7 +554,7 @@ test("history lists CVs, reports and interview sessions", async ({ page, context
   expect(unexpected).toEqual([]);
 });
 
-for (const path of ["/analyze", "/jobs", "/history", "/create", "/profile", `/analysis/${ANALYSIS_ID}`, `/interview/${INTERVIEW_ID}`]) {
+for (const path of ["/analyze", "/jobs", "/history", "/create", "/profile", "/pricing", "/checkout", "/photo-studio", `/analysis/${ANALYSIS_ID}`, `/interview/${INTERVIEW_ID}`]) {
   test(`${path} fits a phone screen`, async ({ page, context }) => {
     await mockServices(context);
     await signIn(page);
@@ -680,8 +685,13 @@ test("the admin area is refused to regular users and opens from the account menu
   await expect(page.getByRole("navigation", { name: "Quản trị" })).toHaveCount(0);
 
   const { unexpected } = await mockServices(context, { isAdmin: true });
+  // A remembered admin session opens the dashboard, never the job list first.
   await page.goto("/jobs");
-  // Admins keep the same app navigation as everyone else; the admin area opens from the account menu.
+  await expect(page).toHaveURL(/\/admin$/);
+  await expect(page.getByRole("heading", { name: "Tổng quan", level: 1 })).toBeVisible();
+  // Other pages stay reachable by their address; from there the account menu leads back to the dashboard.
+  await page.goto("/analyze");
+  await expect(page.getByRole("navigation", { name: "Điều hướng chính" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Quản trị" })).toHaveCount(0);
   await page.getByRole("button", { name: "Menu tài khoản" }).click();
   await page.getByRole("menuitem", { name: "Trang quản trị" }).click();
@@ -912,9 +922,28 @@ for (const path of ["/jobs", "/profile"]) {
   });
 }
 
+test("signing in as an admin opens the admin area; a shared link still opens its own page", async ({ page, context }) => {
+  const { unexpected } = await mockServices(context, { isAdmin: true });
+  await signIn(page, { admin: true });
+  await expect(page.getByRole("heading", { name: "Tổng quan", level: 1 })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Quản trị" })).toBeVisible();
+  // The logo inside the admin area leads back to its overview.
+  await expect(page.locator("a.brand")).toHaveAttribute("href", "/admin");
+
+  await page.getByRole("button", { name: "Menu tài khoản" }).click();
+  await page.getByRole("menuitem", { name: "Đăng xuất" }).click();
+  await page.goto(`/analysis/${ANALYSIS_ID}`);
+  await page.getByLabel("Email", { exact: true }).fill(EMAIL);
+  await page.getByLabel("Mật khẩu", { exact: true }).fill(PASSWORD);
+  await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Phân tích mức độ phù hợp" })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/analysis/${ANALYSIS_ID}$`));
+  expect(unexpected).toEqual([]);
+});
+
 test("the admin user list is searched by the server, so older accounts can be found", async ({ page, context }) => {
   const { unexpected } = await mockServices(context, { isAdmin: true });
-  await signIn(page);
+  await signIn(page, { admin: true });
   await page.goto("/admin/users");
   const list = page.getByRole("region", { name: "Danh sách người dùng" });
   await expect(list).toContainText("2 tài khoản");
@@ -944,7 +973,7 @@ test("the admin user list is searched by the server, so older accounts can be fo
 
 test("/admin fits a phone screen", async ({ page, context }) => {
   await mockServices(context, { isAdmin: true });
-  await signIn(page);
+  await signIn(page, { admin: true });
   await page.setViewportSize({ width: 390, height: 844 });
   for (const path of ["/admin", "/admin/users", "/admin/ai", "/admin/revenue"]) {
     await page.goto(path);
@@ -1036,17 +1065,17 @@ const RICH_CV = {
   links: [{ label: "GitHub", url: "github.com/minhanh" }],
 };
 
-test("the template library offers seventeen templates in groups and a new one is applied and saved", async ({ page, context }) => {
+test("the template library offers twenty-five templates in groups and a new one is applied and saved", async ({ page, context }) => {
   const { posts, unexpected } = await mockServices(context);
   await signIn(page);
   await page.goto("/create");
-  await expect(page.locator(".template-card")).toHaveCount(17);
-  await expect(page.locator(".template-count")).toHaveText("17 mẫu");
-  await page.getByRole("button", { name: "Chuyên nghiệp (8)" }).click();
-  await expect(page.locator(".template-card")).toHaveCount(8);
+  await expect(page.locator(".template-card")).toHaveCount(25);
+  await expect(page.locator(".template-count")).toHaveText("25 mẫu");
+  await page.getByRole("button", { name: "Chuyên nghiệp (10)" }).click();
+  await expect(page.locator(".template-card")).toHaveCount(10);
   await expect(page.getByRole("button", { name: /^Corporate 2 cột/ })).toBeVisible();
   await page.locator(".template-picker").screenshot({ path: test.info().outputPath("picker-professional.png") });
-  await page.getByRole("button", { name: "Tất cả (17)" }).click();
+  await page.getByRole("button", { name: "Tất cả (25)" }).click();
   await page.getByRole("button", { name: /^Tech/ }).click();
   await expect(page.locator(".cv-paper")).toHaveClass(/cv-template-tech/);
   await page.locator(".cv-head h1 .editable").fill("Nguyễn Minh Anh");
@@ -1061,7 +1090,8 @@ test("each new template keeps a full-bleed header inside the paper, on screen an
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(`/cv/${CV_ID}`);
   const select = page.getByLabel("Mẫu");
-  for (const template of ["elegant", "tech", "timeline", "bold", "pastel", "ats", "executive", "creative", "corporate", "consultant", "formal", "monogram", "slate"]) {
+  for (const template of ["elegant", "tech", "timeline", "bold", "pastel", "ats", "executive", "creative", "corporate", "consultant", "formal", "monogram", "slate",
+    "aurora", "duotone", "editorial", "outline", "academic", "coral", "skyline", "ivory"]) {
     await select.selectOption(template);
     const paper = page.locator(".cv-paper");
     await expect(paper).toHaveClass(new RegExp(`cv-template-${template}`));
@@ -1072,7 +1102,7 @@ test("each new template keeps a full-bleed header inside the paper, on screen an
   }
   // A narrower screen uses smaller paper padding; the Executive and Tech headers must follow it.
   await page.setViewportSize({ width: 900, height: 1000 });
-  for (const template of ["executive", "tech"]) {
+  for (const template of ["executive", "tech", "aurora", "duotone"]) {
     await select.selectOption(template);
     const [paperBox, headBox] = [await page.locator(".cv-paper").boundingBox(), await page.locator(".cv-head").boundingBox()];
     expect(headBox!.x).toBeGreaterThanOrEqual(paperBox!.x - 0.5);
@@ -1089,7 +1119,7 @@ test("professional templates lead with experience and put skills in a column bes
   await page.goto(`/cv/${CV_ID}`);
   const select = page.getByLabel("Mẫu");
   const box = async (selector: string) => (await page.locator(selector).boundingBox())!;
-  for (const [template, side] of [["corporate", "left"], ["consultant", "right"], ["monogram", "right"], ["slate", "left"]] as const) {
+  for (const [template, side] of [["corporate", "left"], ["consultant", "right"], ["monogram", "right"], ["slate", "left"], ["coral", "left"], ["skyline", "left"], ["ivory", "right"]] as const) {
     await select.selectOption(template);
     const [experience, education, skills] = [await box(".cv-sec-experience"), await box(".cv-sec-education"), await box(".cv-sec-skills")];
     expect(experience.y, `${template}: experience above education`).toBeLessThan(education.y);
@@ -1166,5 +1196,62 @@ test("a profile picture is cropped square, saved, shown in the header and can be
   await expect(page.getByRole("status").filter({ hasText: "Đã xóa ảnh đại diện" })).toBeVisible();
   await expect(page.locator(".account-trigger img.avatar-photo")).toHaveCount(0);
   await expect(page.locator(".account-trigger .avatar")).toHaveText("F");
+  expect(unexpected).toEqual([]);
+});
+
+// A 4x4 PNG, enough for the browser to decode and resize.
+const PORTRAIT_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEUlEQVR4nGNoWHAAjhiI4wAACGEeAQdJ+X4AAAAASUVORK5CYII=", "base64");
+
+test("a free user upgrades to Pro through checkout and sees the plan everywhere", async ({ page, context }) => {
+  const { unexpected } = await mockServices(context);
+  await signIn(page);
+  await page.getByRole("link", { name: "Nâng cấp Pro", exact: true }).click();
+  await expect(page).toHaveURL(/\/pricing$/);
+  await expect(page.getByRole("region", { name: "Các gói" })).toContainText("29.000đ");
+  await page.getByRole("link", { name: "Nâng cấp Pro 1 tháng" }).click();
+
+  await expect(page).toHaveURL(/\/checkout\?plan=pro_month$/);
+  await expect(page.getByRole("note")).toContainText("Chế độ demo");
+  await page.getByText("Pro 3 tháng").click();
+  await expect(page.getByRole("complementary", { name: "Tóm tắt đơn hàng" })).toContainText("59.000đ");
+  await page.getByRole("button", { name: "Thanh toán 59.000đ" }).click();
+  await expect(page.getByRole("img", { name: /Mã QR thanh toán đơn/ })).toBeVisible();
+  await expect(page.getByText(/Mã hết hạn sau 1[45]:\d\d/)).toBeVisible();
+  await page.getByRole("button", { name: "Mô phỏng thanh toán thành công" }).click();
+  await expect(page.getByRole("heading", { name: "Nâng cấp thành công!" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Thanh toán" })).toContainText("còn 90 ngày");
+
+  // The header and the profile show the new plan, and it survives a reload.
+  await page.reload();
+  await expect(page.getByRole("link", { name: "PRO", exact: true })).toBeVisible();
+  await page.goto("/profile");
+  const plan = page.getByRole("region", { name: "Gói & hạn mức" });
+  await expect(plan).toContainText("Pro 3 tháng");
+  await expect(plan).toContainText("0/30");
+  await expect(plan).toContainText("Lịch sử thanh toán (1)");
+  expect(unexpected).toEqual([]);
+});
+
+test("the photo studio needs consent, uses a quota and offers four results", async ({ page, context }) => {
+  const { unexpected } = await mockServices(context);
+  await signIn(page);
+  await page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Ảnh CV AI" }).click();
+  await expect(page).toHaveURL(/\/photo-studio$/);
+  const create = page.getByRole("button", { name: /Tạo 4 phương án/ });
+  await expect(create).toBeDisabled();
+
+  await page.getByLabel("Chọn ảnh chân dung").setInputFiles({ name: "me.png", mimeType: "image/png", buffer: PORTRAIT_PNG });
+  await expect(page.getByRole("img", { name: "Ảnh gốc của bạn" })).toBeVisible();
+  await expect(create).toBeDisabled();
+  await page.getByText("Tôi xác nhận đây là ảnh của chính tôi").click();
+  await page.getByText("Tài chính / Ngân hàng / Luật").click();
+  await page.getByText("Xanh navy").click();
+  await create.click();
+
+  const results = page.getByRole("radiogroup", { name: "Chọn phương án" });
+  await expect(results.locator("label")).toHaveCount(4, { timeout: 15_000 });
+  await expect(page.getByRole("link", { name: "Tải ảnh đã chọn" })).toHaveAttribute("download", "anh-cv-finance.jpg");
+  // The free plan has one photo, so the next one asks for an upgrade.
+  await expect(page.getByRole("link", { name: "Nâng cấp Pro để tạo thêm ảnh" })).toBeVisible();
   expect(unexpected).toEqual([]);
 });

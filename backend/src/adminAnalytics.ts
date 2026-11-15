@@ -4,8 +4,8 @@ import { HttpError } from "./errors";
 import { JOB_CATEGORIES } from "./jobs/categories";
 import { supabase } from "./supabase";
 
-export const MIGRATION_011 = "011_admin_analytics.sql";
-export const ADMIN_TX_PAGE_SIZE = 20;
+const MIGRATION_011 = "011_admin_analytics.sql";
+const ADMIN_TX_PAGE_SIZE = 20;
 
 type DbError = { code?: string; message?: string } | null;
 
@@ -20,8 +20,8 @@ function failIfMissing(error: DbError): void {
 
 // ---------- Activity & funnel ----------
 
-export type DailyActivity = { day: string; new_users: number; analyses: number; interviews: number; cvs: number };
-export type Funnel = { signed_up: number; has_cv: number; analyzed: number; interviewed: number; paid: number; active_7d: number };
+type DailyActivity = { day: string; new_users: number; analyses: number; interviews: number; cvs: number };
+type Funnel = { signed_up: number; has_cv: number; analyzed: number; interviewed: number; paid: number; active_7d: number };
 export type PeriodTotals = { new_users: number; analyses: number; interviews: number; cvs: number };
 export type AdminActivity = {
   days: number;
@@ -34,7 +34,7 @@ export type AdminActivity = {
 
 const num = (value: unknown) => Number(value) || 0;
 
-export function sumPeriod(rows: DailyActivity[]): PeriodTotals {
+function sumPeriod(rows: DailyActivity[]): PeriodTotals {
   return rows.reduce((total, row) => ({
     new_users: total.new_users + row.new_users,
     analyses: total.analyses + row.analyses,
@@ -198,9 +198,9 @@ export type AdminUserDetail = {
   ai_30d: { calls: number; total_tokens: number; cost_vnd: number } | null;
 };
 
-async function countOf(table: string, userId: string, extra?: (query: any) => any): Promise<number> {
+async function countOf(table: string, userId: string, status?: string): Promise<number> {
   let query = supabase.from(table).select("user_id", { count: "exact", head: true }).eq("user_id", userId);
-  if (extra) query = extra(query);
+  if (status) query = query.eq("status", status);
   const { count, error } = await query;
   if (error) throw error;
   return count ?? 0;
@@ -217,7 +217,7 @@ export async function fetchAdminUserDetail(id: string): Promise<AdminUserDetail>
     countOf("cv_documents", id),
     countOf("analyses", id),
     countOf("interview_sessions", id),
-    countOf("transactions", id, (query) => query.eq("status", "SUCCESS")),
+    countOf("transactions", id, "SUCCESS"),
     supabase.from("analyses").select("id,rci_score,created_at").eq("user_id", id).order("created_at", { ascending: false }).limit(5),
     supabase.from("transactions").select("order_code,amount,status,created_at").eq("user_id", id).order("created_at", { ascending: false }).limit(10),
     supabase.from("ai_usage").select("input_tokens,output_tokens,thought_tokens,total_tokens").eq("user_id", id).gte("created_at", since).limit(5000)

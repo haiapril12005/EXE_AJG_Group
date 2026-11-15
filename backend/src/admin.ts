@@ -14,7 +14,7 @@ export function deriveUserCode(id: string): string {
 
 const emailSchema = z.string().trim().toLowerCase().email().max(320);
 
-export type AdminCandidate = {
+type AdminCandidate = {
   id: string;
   email: string;
   full_name: string;
@@ -22,7 +22,7 @@ export type AdminCandidate = {
   email_confirmed_at: string | null;
 };
 
-export type AdminRuleCheck =
+type AdminRuleCheck =
   | { ok: true; normalizedEmail: string; alreadyAdmin: boolean }
   | { ok: false; code: "INVALID_EMAIL" | "USER_NOT_FOUND" | "EMAIL_NOT_CONFIRMED" | "MAX_LIMIT_REACHED"; message: string };
 
@@ -70,7 +70,7 @@ export function validateAdminGrantCandidate(
   return { ok: true, normalizedEmail, alreadyAdmin: false };
 }
 
-export type AdminUserSummary = {
+type AdminUserSummary = {
   id: string;
   user_code: string;
   email: string;
@@ -88,7 +88,7 @@ export type AdminUserRow = {
   created_at: string;
 };
 
-export type AdminTransactionItem = {
+type AdminTransactionItem = {
   order_code: number;
   amount: number;
   status: "PENDING" | "SUCCESS" | "CANCELLED";
@@ -140,15 +140,15 @@ export type AdminOverview = {
 };
 
 /** A report counts as a strong match from this score. */
-export const HIGH_MATCH_SCORE = 70;
-export const ADMIN_USERS_PAGE_SIZE = 20;
+const HIGH_MATCH_SCORE = 70;
+const ADMIN_USERS_PAGE_SIZE = 20;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // Supabase returns at most 1,000 rows per request by default ("Max rows"), so larger reads go page by page.
 const READ_PAGE_SIZE = 1000;
 const MAX_READ_PAGES = 500;
 
 /** Exact row counts, taken with count queries so no row limit can cut them short. */
-export type OverviewCounts = {
+type OverviewCounts = {
   users: number;
   admins: number;
   newUsers7d: number;
@@ -166,7 +166,7 @@ export type OverviewCounts = {
   activeJobs: number;
 };
 
-export type OverviewInput = {
+type OverviewInput = {
   now?: number;
   counts: OverviewCounts;
   credits: number[];
@@ -360,7 +360,7 @@ export function searchWords(query: string | undefined, limit = 5): string[] {
   return (query ?? "").replace(/[%_,()*\\"':]/g, " ").split(/\s+/u).filter(Boolean).slice(0, limit);
 }
 
-export type AdminUserPage = { users: AdminUserRow[]; total: number; page: number; page_size: number };
+type AdminUserPage = { users: AdminUserRow[]; total: number; page: number; page_size: number };
 
 /** Searches all accounts in the database; each word must match the email, the name or the 8-digit ID. */
 export async function listAdminUsers(query: string | undefined, page: number): Promise<AdminUserPage> {

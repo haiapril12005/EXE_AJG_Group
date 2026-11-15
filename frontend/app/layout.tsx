@@ -3,6 +3,7 @@ import { AppFrame } from "./app-frame";
 import "./globals.css";
 import "./workspace.css";
 import "./theme-polish.css";
+import "./pro.css";
 
 export const metadata: Metadata = {
   title: "Job Ready | Tối ưu CV cùng AI",
@@ -11,7 +12,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="vi" data-scroll-behavior="smooth">
+    // Browser extensions (QuillBot, Grammarly...) add attributes to <html> before React runs; this keeps
+    // that from showing as a hydration error. Only this element's own attributes are exempt.
+    <html lang="vi" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />

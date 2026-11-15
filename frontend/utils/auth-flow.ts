@@ -34,7 +34,7 @@ export function newPasswordProblem(password: string, confirmation: string): stri
   return null;
 }
 
-export type PasswordStrength = {
+type PasswordStrength = {
   /** 0 = nothing typed, 1 = weak … 4 = strong. */
   score: 0 | 1 | 2 | 3 | 4;
   label: string;

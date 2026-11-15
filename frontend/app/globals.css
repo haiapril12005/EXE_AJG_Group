@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap");
 @import "tailwindcss";
 
 :root {
@@ -969,18 +968,6 @@ body:has(> main.app-shell.theme-dark) {
 .auth-card {
   width: min(100%, 440px);
   padding: 34px;
-}
-
-.auth-mark {
-  display: grid;
-  width: 52px;
-  height: 52px;
-  place-items: center;
-  margin-bottom: 20px;
-  border-radius: 18px;
-  background: rgba(16, 185, 129, .12);
-  color: var(--green);
-  font-size: 27px;
 }
 
 .auth-card h1 {

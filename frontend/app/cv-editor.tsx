@@ -30,7 +30,15 @@ export const CV_TEMPLATES = [
   { id: "consultant", name: "Consultant", category: "professional", columns: 2, description: "Đầu trang xám nhạt, cột phải cho kỹ năng, điểm nhấn đỏ rượu vang; hợp tư vấn, quản lý." },
   { id: "formal", name: "Formal", category: "professional", columns: 1, description: "Tên mục nằm ở lề trái, chữ có chân; trình bày chuẩn mực cho hồ sơ nhiều kinh nghiệm." },
   { id: "monogram", name: "Monogram", category: "professional", columns: 2, description: "Chữ viết tắt tên trong vòng tròn, cột phải xanh teal; hợp giáo dục, y tế, dịch vụ." },
-  { id: "slate", name: "Slate", category: "professional", columns: 2, description: "Đầu trang xám than tràn viền, cột trái cho kỹ năng, điểm nhấn hổ phách; hợp kỹ thuật, vận hành." }
+  { id: "slate", name: "Slate", category: "professional", columns: 2, description: "Đầu trang xám than tràn viền, cột trái cho kỹ năng, điểm nhấn hổ phách; hợp kỹ thuật, vận hành." },
+  { id: "aurora", name: "Aurora", category: "creative", columns: 1, description: "Đầu trang chuyển màu tím hồng, gạch chân tiêu đề cùng tông; hợp truyền thông, sự kiện, startup." },
+  { id: "duotone", name: "Duotone", category: "modern", columns: 1, description: "Dải đầu trang hai màu chéo xanh than và xanh ngọc; hiện đại, hợp sản phẩm và dữ liệu." },
+  { id: "editorial", name: "Editorial", category: "creative", columns: 1, description: "Phong cách tạp chí: tên lớn chữ có chân, mục đánh số 01, 02; hợp biên tập, content, thiết kế." },
+  { id: "outline", name: "Outline", category: "basic", columns: 1, description: "Mỗi mục nằm trong khung viền mảnh, đen trắng, dễ in; hợp mọi ngành." },
+  { id: "academic", name: "Academic", category: "professional", columns: 1, description: "Chữ có chân, kẻ xanh đậm, học vấn đặt trước; hợp nghiên cứu, giảng dạy, học bổng." },
+  { id: "coral", name: "Coral", category: "creative", columns: 2, description: "Cột trái màu đào ấm cho kỹ năng, tiêu đề san hô; thân thiện, hợp chăm sóc khách hàng, nhân sự." },
+  { id: "skyline", name: "Skyline", category: "modern", columns: 2, description: "Cột trái xám nhạt với tên và liên hệ, viền trên xanh lam; gọn gàng cho hồ sơ nhiều kinh nghiệm." },
+  { id: "ivory", name: "Ivory", category: "professional", columns: 2, description: "Chữ có chân, cột phải màu ngà với tiêu đề vàng đồng; sang trọng, hợp khách sạn, luật, tài chính." }
 ] as const;
 
 export type CvTemplateId = (typeof CV_TEMPLATES)[number]["id"];

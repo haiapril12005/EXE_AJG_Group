@@ -38,6 +38,7 @@
     radial-gradient(1200px 420px at 50% -180px, rgba(16, 185, 129, .07), transparent 70%),
     var(--page);
   background-attachment: fixed;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 /* Dark mode stays true black, as designed (and as the UI tests check); only depth tokens are added. */
@@ -59,7 +60,8 @@ body {
 }
 
 /* The default CV templates were designed around Nunito; keep them identical in the editor and the PDF. */
-.cv-paper { font-family: "Nunito", "Segoe UI", Arial, Helvetica, sans-serif; }
+/* :where() keeps this at zero specificity, so a template's own font (Lora, Consolas...) wins. */
+:where(.cv-paper) { font-family: "Nunito", "Segoe UI", Arial, Helvetica, sans-serif; }
 
 .hero h1,
 .page-heading h1 {
@@ -115,14 +117,33 @@ body {
 .job-card h2 { font-size: 15.5px; font-weight: 700; letter-spacing: -.005em; }
 .job-card-company strong { font-weight: 600; }
 
-.admin-kpi-value { font-weight: 800; font-variant-numeric: tabular-nums; }
 .score-summary strong { font-weight: 800; font-variant-numeric: tabular-nums; }
 
-/* ---------- Header ---------- */
+/* ---------- Header (Liquid Glass) ---------- */
 .site-header {
-  border-bottom-color: var(--line);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, rgba(255, 255, 255, .35));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface) 78%, rgba(255, 255, 255, .45)),
+    color-mix(in srgb, var(--surface) 66%, transparent)
+  );
+  backdrop-filter: saturate(200%) blur(22px);
+  -webkit-backdrop-filter: saturate(200%) blur(22px);
+  box-shadow:
+    0 8px 32px -12px rgba(15, 23, 42, .08),
+    inset 0 1px 0 rgba(255, 255, 255, .6);
+}
+
+.theme-dark .site-header {
+  border-bottom-color: rgba(255, 255, 255, .08);
+  background: linear-gradient(
+    180deg,
+    rgba(19, 28, 46, .74),
+    rgba(13, 20, 34, .62)
+  );
+  box-shadow:
+    0 12px 36px -14px rgba(0, 0, 0, .55),
+    inset 0 1px 0 rgba(255, 255, 255, .1);
 }
 
 .header-inner { min-height: 68px; }
@@ -140,34 +161,141 @@ body {
 .brand strong { font-size: 16px; font-weight: 800; letter-spacing: -.02em; }
 .brand small { font-size: 9px; font-weight: 600; letter-spacing: .12em; }
 
+/* Frosted Liquid Glass capsule rail */
 .app-nav {
+  position: relative;
   gap: 2px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface-muted);
+  padding: 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, .08);
+  background: linear-gradient(
+    180deg,
+    rgba(226, 232, 240, .62),
+    rgba(241, 245, 249, .48)
+  );
+  backdrop-filter: saturate(190%) blur(18px);
+  -webkit-backdrop-filter: saturate(190%) blur(18px);
+  box-shadow:
+    inset 0 1px 2px rgba(15, 23, 42, .07),
+    inset 0 -1px 0 rgba(255, 255, 255, .8),
+    0 6px 20px -10px rgba(15, 23, 42, .1);
+  isolation: isolate;
+}
+
+.theme-dark .app-nav {
+  border-color: rgba(255, 255, 255, .12);
+  background: linear-gradient(
+    180deg,
+    rgba(15, 23, 42, .72),
+    rgba(30, 41, 59, .54)
+  );
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, .55),
+    inset 0 -1px 0 rgba(255, 255, 255, .1),
+    0 12px 28px -10px rgba(0, 0, 0, .55);
+}
+
+/* Single Liquid Glass droplet that glides continuously from the old item to the new item */
+.app-nav-pill {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 0;
+  z-index: 1;
+  border-radius: 999px;
+  pointer-events: none;
+  will-change: transform, width;
+}
+
+/* Inner glass body that stretches, squashes & refracts via Web Animations API */
+.app-nav-pill-glass {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  transform-origin: center center;
+  background:
+    radial-gradient(120% 120% at 50% -20%, rgba(255, 255, 255, 1), rgba(255, 255, 255, .82) 55%, rgba(209, 250, 229, .72) 100%),
+    linear-gradient(135deg, rgba(255, 255, 255, .94), rgba(236, 253, 245, .82));
+  backdrop-filter: blur(16px) saturate(200%);
+  -webkit-backdrop-filter: blur(16px) saturate(200%);
+  box-shadow:
+    0 6px 18px -3px rgba(5, 150, 105, .28),
+    0 2px 6px rgba(15, 23, 42, .1),
+    inset 0 1.5px 1px rgba(255, 255, 255, 1),
+    inset 0 -1.5px 2px rgba(16, 185, 129, .28),
+    0 0 0 1px rgba(16, 185, 129, .22);
+  will-change: transform;
+}
+
+.theme-dark .app-nav-pill-glass {
+  background:
+    radial-gradient(125% 110% at 50% -15%, rgba(255, 255, 255, .28), rgba(16, 185, 129, .22) 58%, rgba(6, 78, 59, .38) 100%),
+    linear-gradient(135deg, rgba(30, 41, 59, .86), rgba(15, 23, 42, .72));
+  box-shadow:
+    0 8px 22px -4px rgba(16, 185, 129, .34),
+    0 2px 8px rgba(0, 0, 0, .5),
+    inset 0 1.5px 1px rgba(255, 255, 255, .42),
+    inset 0 -1.5px 2px rgba(52, 211, 153, .32),
+    0 0 0 1px rgba(52, 211, 153, .32);
+}
+
+/* Specular caustic light sweep when droplet glides */
+.app-nav-pill-sheen {
+  position: absolute;
+  inset: -35% -15%;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, .82) 46%,
+    rgba(167, 243, 208, .6) 54%,
+    transparent 100%
+  );
+  filter: blur(2px);
+  will-change: transform, opacity;
+}
+
+.theme-dark .app-nav-pill-sheen {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, .4) 46%,
+    rgba(52, 211, 153, .42) 54%,
+    transparent 100%
+  );
 }
 
 .app-nav a {
-  padding: 7px 14px;
-  border-radius: 9px;
+  position: relative;
+  z-index: 2;
+  padding: 7px 15px;
+  border-radius: 999px;
   font-size: 13.5px;
   font-weight: 600;
-  transition: color .15s ease, background-color .15s ease, box-shadow .15s ease;
+  transition: color .25s ease, text-shadow .25s ease;
 }
 
-.app-nav a:hover { background: var(--surface-soft); color: var(--heading); }
+.app-nav a:hover {
+  color: var(--heading);
+}
 
 .app-nav a.is-active {
-  background: var(--surface);
-  box-shadow: var(--shadow-xs), 0 0 0 1px var(--line);
   color: var(--green-hover);
+  font-weight: 600;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .65);
 }
 
-.theme-dark .app-nav a.is-active { color: var(--green); }
+.theme-dark .app-nav a.is-active {
+  color: #6ee7b7;
+  text-shadow: 0 0 14px rgba(52, 211, 153, .35);
+}
 
 @media (max-width: 1040px) {
-  .app-nav { margin-bottom: 10px; padding: 4px; }
+  .app-nav { margin-bottom: 10px; padding: 5px; }
 }
 
 .theme-toggle {
@@ -216,6 +344,11 @@ body {
 .account-menu-item { border-radius: var(--radius-sm); }
 .account-menu-item strong { font-weight: 600; }
 .account-logout-btn { border-radius: var(--radius-sm); font-weight: 600; }
+
+/* Brand plus the admin-area label; the label only renders inside /admin. */
+.brand-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.account-menu-admin strong { color: var(--green-hover); }
+.theme-dark .account-menu-admin strong { color: var(--green); }
 
 @keyframes polish-pop {
   from { opacity: 0; transform: translateY(-4px) scale(.98); }
@@ -282,8 +415,6 @@ body {
 
 .job-chip { border: 1px solid rgba(16, 185, 129, .2); border-radius: var(--radius-md); }
 
-.admin-kpi-card { padding: 22px; }
-.admin-kpi-card .eyebrow::before { display: none; }
 .history-grid .soft-card { padding: 22px; }
 
 .result-inset,
@@ -305,7 +436,17 @@ body {
 
 .pill { font-weight: 600; border-radius: 8px; }
 .premium-badge { font-weight: 700; }
-.admin-badge, .admin-role-pill { font-weight: 700; }
+.admin-role-pill { font-weight: 700; }
+
+/* Status badges: used in the admin area and on the profile page. */
+.admin-badge { display: inline-block; padding: 3px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.admin-badge-success { background: rgba(16, 185, 129, .14); color: var(--green-hover); }
+.admin-badge-pending { background: rgba(245, 158, 11, .16); color: #b45309; }
+.admin-badge-cancelled { background: rgba(239, 68, 68, .14); color: #dc2626; }
+.admin-badge-neutral { background: var(--surface-soft); color: var(--muted); }
+.theme-dark .admin-badge-success { color: var(--green); }
+.theme-dark .admin-badge-pending { color: #fbbf24; }
+.theme-dark .admin-badge-cancelled { color: #f87171; }
 
 /* ---------- Buttons ---------- */
 .primary-button,
@@ -458,13 +599,10 @@ select.form-input {
 .template-card { border-radius: var(--radius-md); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 .template-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
 
-/* ---------- Scrollbars ---------- */
-.app-shell { scrollbar-color: var(--line-strong) transparent; }
-
 @media (prefers-reduced-motion: reduce) {
-  .app-shell *,
-  .app-shell *::before,
-  .app-shell *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  .app-shell *:not(.app-nav, .app-nav *),
+  .app-shell *:not(.app-nav, .app-nav *)::before,
+  .app-shell *:not(.app-nav, .app-nav *)::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
 @media (max-width: 760px) {

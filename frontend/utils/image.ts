@@ -1,4 +1,4 @@
-export type ImageSize = { width: number; height: number };
+type ImageSize = { width: number; height: number };
 
 /** A CV photo in the 3x4 portrait ratio. */
 export const PHOTO_SIZE: ImageSize = { width: 300, height: 400 };

@@ -20,7 +20,7 @@ export default function AdminSystemPage() {
       {o && (
         <div className="admin-grid-2">
           <AdminCard title={`Quản trị viên (${o.rules.current_admins}/${o.rules.max_admins})`} description={`Còn trống ${o.rules.remaining_slots} chỗ`}>
-            <ul className="admin-simple-list admin-admin-list">
+            <ul className="admin-simple-list">
               {o.admins.map((admin) => (
                 <li key={admin.id}>
                   <div className="admin-person">

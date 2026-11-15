@@ -2,7 +2,6 @@
    globals.css / theme-polish.css, so light and dark themes both work. */
 
 /* ---------- Header in the admin area ---------- */
-.brand-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .admin-area-badge {
   padding: 4px 10px;
   border: 1px solid rgba(16, 185, 129, .3);
@@ -29,7 +28,6 @@
 .is-admin-area .header-inner { width: min(100% - 40px, 1680px); }
 @media (max-width: 760px) { .is-admin-area .header-inner { width: min(100% - 30px, 1680px); } }
 .is-admin-area .site-footer { margin-top: 32px; }
-.account-menu-admin strong { color: var(--green-hover); }
 
 /* ---------- Frame ---------- */
 .admin-layout {
@@ -337,10 +335,6 @@
 
 .admin-pager { display: flex; align-items: center; justify-content: center; gap: 14px; color: var(--muted); font-size: 13px; }
 .admin-pager .secondary-button { width: auto; min-height: 36px; padding: 6px 14px; font-size: 13px; }
-
-/* Status badges keep the existing classes (admin-badge-success / -pending / -cancelled / -neutral). */
-.admin-badge { display: inline-block; padding: 3px 9px; border-radius: 7px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-
 /* ---------- Simple lists ---------- */
 .admin-simple-list { display: grid; margin: 0; padding: 0; list-style: none; }
 .admin-simple-list li {

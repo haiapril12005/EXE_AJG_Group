@@ -11,6 +11,7 @@ import {
 import { formatUserCode, useApp, type Profile } from "../app-frame";
 import { EmailChangeCard } from "./email-change";
 import { AvatarEditor } from "./avatar-editor";
+import { PlanCard } from "./plan-card";
 
 export default function ProfilePage() {
   const { session, token, profile, refreshProfile, signOut } = useApp();
@@ -148,6 +149,8 @@ export default function ProfilePage() {
           </div>
         </div>
       </section>
+
+      <PlanCard />
 
       <div className="input-grid profile-grid">
         <section className="soft-card input-card">

@@ -24,7 +24,7 @@ export const fmtDate = (value: string) => new Date(value).toLocaleDateString("vi
 export const fmtDateTime = (value: string) =>
   new Date(value).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" });
 /** "2026-11-14" → "14/11" */
-export const fmtDay = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
+const fmtDay = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
 
 export const fmtPercent = (part: number, whole: number) => whole > 0 ? `${Math.round((part / whole) * 100)}%` : "—";
 
@@ -73,7 +73,7 @@ export function AdminPageHeader({ title, description, actions }: { title: string
   );
 }
 
-export const PERIODS = [7, 30, 90] as const;
+const PERIODS = [7, 30, 90] as const;
 export type Period = (typeof PERIODS)[number];
 
 export function PeriodPicker({ value, onChange }: { value: Period; onChange: (value: Period) => void }) {

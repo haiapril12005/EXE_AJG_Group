@@ -26,7 +26,7 @@ export type AdminOverview = {
   admins: { id: string; user_code?: string; email: string; full_name: string; created_at: string }[];
 };
 
-export type PeriodTotals = { new_users: number; analyses: number; interviews: number; cvs: number };
+type PeriodTotals = { new_users: number; analyses: number; interviews: number; cvs: number };
 
 export type AdminActivity = {
   days: number;
