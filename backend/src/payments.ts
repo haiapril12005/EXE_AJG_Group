@@ -8,7 +8,7 @@ function canonicalValue(value: PayOSValue): string {
   return value === null || value === undefined ? "" : String(value);
 }
 
-export function signPayOSData(data: PayOSData): string {
+function signPayOSData(data: PayOSData): string {
   if (!config.PAYOS_CHECKSUM_KEY) throw new Error("PAYOS_CHECKSUM_KEY is not configured");
   const canonical = Object.keys(data)
     .sort()

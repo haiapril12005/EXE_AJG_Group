@@ -118,10 +118,12 @@ async function mockServices(context: BrowserContext, options: AuthMocks = {}) {
       switch (url.pathname) {
         case "/api/user/me":
           return reply(route, { status: 200, body: { user: {
-            id: USER_ID, email: EMAIL, full_name: "OTP Demo", credits: 0, payments_enabled: false,
+            id: USER_ID, email: EMAIL, full_name: "OTP Demo", credits: 0, is_admin: false, payments_enabled: false,
           } } });
         case "/api/cv":
           return reply(route, { status: 200, body: { cvs: [] } });
+        case "/api/jobs":
+          return reply(route, { status: 200, body: { jobs: [], total: 0, page: 1, page_size: 20 } });
         case "/api/analyses":
           return reply(route, { status: 200, body: { analyses: [] } });
         case "/api/cv/upload":
@@ -208,8 +210,12 @@ test("signup verifies an entered OTP, rejects expired code, then requires a pass
   await page.getByLabel("Email", { exact: true }).fill(EMAIL);
   await page.getByLabel("Mật khẩu", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Đăng xuất" })).toBeVisible();
+  const accountMenu = page.getByRole("button", { name: "Menu tài khoản" });
+  await expect(accountMenu).toBeVisible();
+  await expect(page).toHaveURL(/\/jobs$/);
   await expect(page.getByText("OTP Demo", { exact: true })).toBeVisible();
+  await accountMenu.click();
+  await expect(page.getByRole("menuitem", { name: "Đăng xuất" })).toBeVisible();
   expect(calls.filter((call) => call.path.endsWith("/verify")).map((call) => ({
     email: call.body.email, token: call.body.token, type: call.body.type,
   }))).toEqual([
@@ -372,6 +378,8 @@ test("selected PDF and JD can start analysis without a separate upload click", a
   await page.getByLabel("Email", { exact: true }).fill(EMAIL);
   await page.getByLabel("Mật khẩu", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Đăng nhập", exact: true }).click();
+  await expect(page).toHaveURL(/\/jobs$/);
+  await page.getByRole("navigation", { name: "Điều hướng chính" }).getByRole("link", { name: "Phân tích" }).click();
   await expect(page.getByRole("heading", { name: /Tối Ưu Hóa Hồ Sơ/ })).toBeVisible();
   await page.locator('input[type="file"]').setInputFiles({
     name: "demo.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\nSynthetic CV test file"),
@@ -524,6 +532,8 @@ test("signup shows a password strength meter that lights up while typing", async
 
 test("the sign-in screen opens dark and the lamp cord or a field turns the light on", async ({ page, context }, testInfo) => {
   const { unexpected } = await mockServices(context);
+  // The cord sways all the time, so it never holds still for a click. Reduced motion stops the sway.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   const shell = page.locator("main.auth-led");
   const cord = page.getByRole("button", { name: "Bật đèn" });

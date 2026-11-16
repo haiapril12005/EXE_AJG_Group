@@ -29,10 +29,21 @@ Trong Supabase SQL Editor, chạy các file sau **theo thứ tự**, mỗi file 
 4. `supabase/migrations/004_job_postings.sql`
 5. `supabase/migrations/005_interview_practice.sql`
 6. `supabase/migrations/006_job_sources_lever_ashby.sql`
+7. `supabase/migrations/007_admin_role.sql`
+8. `supabase/migrations/008_sync_user_email.sql`
+9. `supabase/migrations/009_user_avatar.sql`
 
-Chỉ cần chạy các file chưa chạy. Migration 003 thêm bảng đánh giá CV, phiên phỏng vấn, câu trả lời và các cột chứng cứ/điểm có trọng số. Migration 004 thêm kho việc làm `job_postings`, cột `analyses.job_id` và cho phép phiên phỏng vấn nhanh không gắn với báo cáo phân tích. Migration 005 lưu các lần trả lời trước, câu hỏi nối tiếp của người phỏng vấn AI và cho phép phiên luyện 5 câu; khi chưa chạy, phỏng vấn vẫn hoạt động nhưng trả lời lại sẽ ghi đè, không có câu hỏi nối tiếp và chỉ luyện được 3 câu. Migration 006 cho kho việc làm nhận thêm tin từ Lever và Ashby; khi chưa chạy, các nguồn cũ vẫn đồng bộ bình thường, còn nguồn Lever/Ashby báo lỗi kèm tên file cần chạy. Tạo tài khoản bằng giao diện để trigger tạo hồ sơ người dùng; credit trong schema không bị sử dụng khi PayOS chưa bật.
+Chỉ cần chạy các file chưa chạy. Migration 003 thêm bảng đánh giá CV, phiên phỏng vấn, câu trả lời và các cột chứng cứ/điểm có trọng số. Migration 004 thêm kho việc làm `job_postings`, cột `analyses.job_id` và cho phép phiên phỏng vấn nhanh không gắn với báo cáo phân tích. Migration 005 lưu các lần trả lời trước, câu hỏi nối tiếp của người phỏng vấn AI và cho phép phiên luyện 5 câu; khi chưa chạy, phỏng vấn vẫn hoạt động nhưng trả lời lại sẽ ghi đè, không có câu hỏi nối tiếp và chỉ luyện được 3 câu. Migration 006 cho kho việc làm nhận thêm tin từ Lever và Ashby; khi chưa chạy, các nguồn cũ vẫn đồng bộ bình thường, còn nguồn Lever/Ashby báo lỗi kèm tên file cần chạy. Migration 007 thêm quyền quản trị (`users.is_admin`) kèm trigger kiểm soát 3 quy tắc bảo mật (tài khoản đã xác thực email OTP, tối đa 3 Admin toàn hệ thống, và chỉ gán qua CLI/SQL bằng `SUPABASE_SECRET_KEY`). Migration 009 thêm cột `users.avatar` cho ảnh đại diện; khi chưa chạy, trang Hồ sơ báo cần chạy migration khi tải ảnh, phần còn lại vẫn hoạt động. Ảnh 3x4 trong CV được lưu cùng nội dung CV nên không cần migration. Migration 008 giữ `public.users.email` khớp email đăng nhập sau khi người dùng đổi email ở trang Hồ sơ; khi chưa chạy, backend vẫn đồng bộ lúc đổi email xong, nhưng email đổi bằng cách khác (ví dụ trong Supabase Dashboard) sẽ không cập nhật vào bảng này. Tạo tài khoản bằng giao diện để trigger tạo hồ sơ người dùng; credit trong schema không bị sử dụng khi PayOS chưa bật.
 
-Để người dùng xác nhận đăng ký bằng mã gửi tới email, làm thêm các bước [cấu hình email OTP](email-otp.md): bật Confirm email, cập nhật mẫu Confirm sign up và cấu hình SMTP. API key trong `.env` không tự bật dịch vụ gửi thư tới mọi người dùng.
+Để gán hoặc thu hồi quyền quản trị (Admin) sau khi người dùng đã đăng ký và xác thực email OTP:
+
+```powershell
+npm.cmd run admin:list
+npm.cmd run admin:grant -- ten-email@example.com
+npm.cmd run admin:revoke -- ten-email@example.com
+```
+
+Để người dùng xác nhận đăng ký bằng mã gửi tới email, làm thêm các bước [cấu hình email OTP](email-otp.md): bật Confirm email, cập nhật mẫu Confirm sign up và Change email address, cấu hình SMTP. API key trong `.env` không tự bật dịch vụ gửi thư tới mọi người dùng.
 
 ## Biến môi trường
 
@@ -54,7 +65,7 @@ npm.cmd run db:check
 npm.cmd run dev
 ```
 
-Mở `http://localhost:3000`. Website và API chạy trong cùng một tiến trình, chung cổng `PORT` (mặc định 3000): Express trả lời `/api` và `/health`, mọi đường dẫn khác do Next.js phục vụ. `http://localhost:3000/health/ready` kiểm tra schema. Sửa code backend thì server tự khởi động lại (mất vài giây vì Next.js khởi động lại theo); sửa code frontend thì trang tự cập nhật. Chỉ cần chạy riêng frontend thì dùng `npm.cmd run dev --workspace frontend`, khi đó đặt `NEXT_PUBLIC_API_URL` trỏ tới API đang chạy. Nếu `db:check` báo thiếu bảng/cột, chạy migration còn thiếu rồi thử lại. Dùng `npm.cmd run typecheck`, `npm.cmd test`, `npm.cmd run build` trước khi tạo pull request. Build frontend cần các biến `NEXT_PUBLIC_SUPABASE_*`.
+Mở `http://localhost:3000`. Sau khi đăng nhập, trang chính là kho việc làm `/jobs`; trang phân tích CV–JD nằm ở `/analyze`. Website và API chạy trong cùng một tiến trình, chung cổng `PORT` (mặc định 3000): Express trả lời `/api` và `/health`, mọi đường dẫn khác do Next.js phục vụ. `http://localhost:3000/health/ready` kiểm tra schema. Sửa code backend thì server tự khởi động lại (mất vài giây vì Next.js khởi động lại theo); sửa code frontend thì trang tự cập nhật. Chỉ cần chạy riêng frontend thì dùng `npm.cmd run dev --workspace frontend`, khi đó đặt `NEXT_PUBLIC_API_URL` trỏ tới API đang chạy. Nếu `db:check` báo thiếu bảng/cột, chạy migration còn thiếu rồi thử lại. Dùng `npm.cmd run typecheck`, `npm.cmd test`, `npm.cmd run build` trước khi tạo pull request. Build frontend cần các biến `NEXT_PUBLIC_SUPABASE_*`.
 
 ## Kho việc làm
 

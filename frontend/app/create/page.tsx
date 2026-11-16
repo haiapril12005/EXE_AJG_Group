@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../utils/api";
 import { useApp } from "../app-frame";
-import { CV_TEMPLATES, CvPaper, EMPTY_ITEMS, emptyCv, ListInput, type CvData, type CvListKey } from "../cv-editor";
+import { CV_TEMPLATES, CvPaper, EMPTY_ITEMS, emptyCv, ListInput, TEMPLATE_CATEGORIES, type CvData, type CvListKey, type TemplateCategory } from "../cv-editor";
 
 export default function CreateCvPage() {
   const { session, token } = useApp();
@@ -13,6 +13,7 @@ export default function CreateCvPage() {
   const [cvId, setCvId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "error">("idle");
   const [notice, setNotice] = useState("");
+  const [category, setCategory] = useState<TemplateCategory | "all">("all");
   const cvRef = useRef(cv);
   const idRef = useRef<string | null>(null);
   const savingRef = useRef<Promise<string | null> | null>(null);
@@ -85,11 +86,19 @@ export default function CreateCvPage() {
       {notice && <p role="status" className="notice notice-info no-print">{notice}</p>}
       <section className="template-picker no-print" aria-label="Chọn mẫu CV">
         <div className="template-picker-heading"><div><p className="eyebrow">THƯ VIỆN THIẾT KẾ</p><h1>Chọn mẫu CV của bạn</h1><p>Chọn một phong cách. Nội dung đã nhập sẽ được giữ nguyên.</p></div><span className="template-count">{CV_TEMPLATES.length} mẫu</span></div>
+        <div className="job-tabs template-tabs" role="group" aria-label="Nhóm mẫu CV">
+          {[{ id: "all" as const, label: "Tất cả" }, ...TEMPLATE_CATEGORIES].map((item) => {
+            const count = item.id === "all" ? CV_TEMPLATES.length : CV_TEMPLATES.filter((template) => template.category === item.id).length;
+            return <button key={item.id} type="button" className={`job-tab ${category === item.id ? "is-active" : ""}`} aria-pressed={category === item.id}
+              onClick={() => setCategory(item.id)}>{item.label} ({count})</button>;
+          })}
+        </div>
+        <p className="template-tip">Mẹo: ít kinh nghiệm nên chọn mẫu 1 cột để nội dung không bị thưa; nhiều kinh nghiệm hợp mẫu 2 cột để gọn trong một trang.</p>
         <div className="template-grid">
-          {CV_TEMPLATES.map((template) => (
+          {CV_TEMPLATES.filter((template) => category === "all" || template.category === category).map((template) => (
             <button key={template.id} type="button" className={`template-card ${cv.template === template.id ? "is-selected" : ""}`} aria-pressed={cv.template === template.id} onClick={() => change({ ...cv, template: template.id })}>
               <span className={`template-thumb template-thumb-${template.id}`} aria-hidden="true"><i /><b /><em /><small /><small /><small /><small /></span>
-              <span className="template-card-copy"><strong>{template.name}</strong><small>{template.description}</small></span>
+              <span className="template-card-copy"><strong>{template.name} <span className="template-columns">{template.columns} cột</span></strong><small>{template.description}</small></span>
               {cv.template === template.id && <span className="template-selected-mark" aria-label="Đang chọn">✓</span>}
             </button>
           ))}

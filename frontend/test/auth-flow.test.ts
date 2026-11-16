@@ -132,6 +132,7 @@ test("known auth errors remain actionable without rendering upstream messages", 
     ["email_provider_disabled", /chưa khả dụng/],
     ["weak_password", /chưa đủ mạnh/],
     ["email_address_invalid", /email không hợp lệ/],
+    ["email_exists", /đã được dùng/],
     ["unexpected_failure", /chưa xử lý được/],
   ];
   for (const [code, expected] of cases) {

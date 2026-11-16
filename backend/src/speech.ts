@@ -1,6 +1,7 @@
 import { config } from "./config";
 import { HttpError } from "./errors";
 import { getGemini } from "./aiService";
+import { recordAiUsage } from "./aiUsage";
 import { LruCache } from "./cache";
 
 export async function transcribeAudio(buffer: Buffer, mimeType: string): Promise<string> {
@@ -21,11 +22,16 @@ export async function transcribeAudio(buffer: Buffer, mimeType: string): Promise
         throw new HttpError(502, "Không xử lý được bản thu âm. Hãy thử lại hoặc nhập câu trả lời.");
       }
     }
+    const startedAt = Date.now();
     const result = await client.interactions.create({
       model: config.GEMINI_STT_MODEL,
       input: [{ type: "audio", uri: file.uri, mime_type: file.mimeType }],
       store: false
-    }, { timeout_ms: 90_000, maxRetries: 0 });
+    }, { timeout_ms: 90_000, maxRetries: 0 }).catch((error: unknown) => {
+      recordAiUsage({ model: config.GEMINI_STT_MODEL, startedAt, success: false });
+      throw error;
+    });
+    recordAiUsage({ model: config.GEMINI_STT_MODEL, result, startedAt, success: true });
     const transcript = result.output_text?.trim();
     if (!transcript) throw new HttpError(422, "Không nhận diện được lời nói. Hãy thử thu âm lại hoặc nhập câu trả lời.");
     return transcript.slice(0, 5000);
@@ -52,6 +58,7 @@ export function synthesizeQuestion(text: string): Promise<Buffer> {
 
 async function synthesize(text: string): Promise<Buffer> {
   const client = await getGemini();
+  const startedAt = Date.now();
   const result = await client.interactions.create({
     model: config.GEMINI_TTS_MODEL,
     input: [{ type: "user_input", content: [{ type: "text", text,
@@ -59,7 +66,11 @@ async function synthesize(text: string): Promise<Buffer> {
     response_format: { type: "audio" },
     generation_config: { speech_config: [{ voice: config.GEMINI_TTS_VOICE }] },
     store: false
-  }, { timeout_ms: 90_000, maxRetries: 0 });
+  }, { timeout_ms: 90_000, maxRetries: 0 }).catch((error: unknown) => {
+    recordAiUsage({ model: config.GEMINI_TTS_MODEL, startedAt, success: false });
+    throw error;
+  });
+  recordAiUsage({ model: config.GEMINI_TTS_MODEL, result, startedAt, success: true });
   const data = result.output_audio?.data;
   if (!data) throw new HttpError(502, "Không tạo được giọng nói cho câu hỏi.");
   return Buffer.from(data, "base64");

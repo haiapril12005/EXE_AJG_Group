@@ -1,20 +1,28 @@
-import { Router, type Response } from "express";
+import { Router, type NextFunction, type Response } from "express";
+import rateLimit from "express-rate-limit";
 import multer from "multer";
 import { z } from "zod";
-import { analyzeCVvsJD, evaluateInterviewAnswer, generateCvQualityFeedback, generateMockQuestions, rewriteSection, rewriteSectionSchema, structureCV } from "./aiService";
-import { cvDataSchema, cvDataToText, emptyCvData, extractContacts, extractLinks, maskText, stripNul, type CvData } from "./cvData";
+import { deriveUserCode, fetchAdminOverview, isMissingAdminColumn, listAdminUsers, MIGRATION_007 } from "./admin";
+import { buildChatInput, chatRequestSchema } from "./chat";
+import { analyzeCVvsJD, chatReply, evaluateInterviewAnswer, generateCvQualityFeedback, generateMockQuestions, rewriteSection, rewriteSectionSchema, structureCV } from "./aiService";
+import { cvDataSchema, cvDataToText, imageDataUrlSchema, emptyCvData, extractContacts, extractLinks, maskText, stripNul, type CvData } from "./cvData";
 import { inspectCvQuality, scoreQualityIssues } from "./cvQuality";
 import { requireAuth, type AuthenticatedRequest } from "./auth";
 import { config } from "./config";
 import { HttpError } from "./errors";
+import { categoriesOfFilter, JOB_CATEGORY_FILTERS, JOB_CATEGORY_GROUPS } from "./jobs/categories";
 import { createPayOSPayment, verifyPayOSWebhook } from "./payments";
 import { authClient, supabase } from "./supabase";
 import { parseBody } from "./validation";
 import { synthesizeQuestion, transcribeAudio } from "./speech";
 import { normalizeEvidence } from "./scoring";
+import { withAiContext } from "./aiUsage";
+import { fetchAdminActivity, fetchAdminJobStats, fetchAdminUserDetail, fetchAiUsageReport, listAdminTransactions } from "./adminAnalytics";
 import { followUpQuestionOf, interviewQuestionsSchema, MAX_QUESTIONS, overallScore, withPreviousAttempt } from "./interview";
 
 const router = Router();
+// Keeps the request in async context so each AI call is recorded with its user and feature.
+router.use(withAiContext);
 
 const LIST_PAGE_SIZE = 20;
 const listPageSchema = z.object({ page: z.coerce.number().int().min(1).max(1000).default(1) });
@@ -114,12 +122,279 @@ router.post("/auth/login", async (req, res) => {
   }
 });
 
+function isMissingUserColumn(error: { message?: string } | null): boolean {
+  return Boolean(error?.message && /is_admin|phone|user_code/i.test(error.message));
+}
+
+const MIGRATION_009 = "009_user_avatar.sql";
+
+/** The picture is optional: without migration 009 the profile simply has none. */
+async function loadAvatar(id: string): Promise<string | null> {
+  const { data, error } = await supabase.from("users").select("avatar").eq("id", id).maybeSingle();
+  if (error) {
+    if (!/avatar/i.test(error.message)) console.warn(`Profile loaded without a picture: ${error.message}`);
+    return null;
+  }
+  return (data?.avatar as string | null | undefined) ?? null;
+}
+
+async function loadUserProfile(id: string) {
+  type UserRow = {
+    id: string;
+    user_code?: string | null;
+    email: string;
+    full_name: string;
+    phone?: string;
+    credits: number;
+    is_admin?: boolean;
+    created_at?: string;
+  };
+  let result = await supabase.from("users").select("id,user_code,email,full_name,phone,credits,is_admin,created_at").eq("id", id).single();
+  if (isMissingUserColumn(result.error)) {
+    const withAdmin = await supabase.from("users").select("id,email,full_name,credits,is_admin,created_at").eq("id", id).single();
+    if (!isMissingUserColumn(withAdmin.error)) {
+      result = { ...withAdmin, data: withAdmin.data ? { ...withAdmin.data, phone: "", user_code: null } : null } as typeof result;
+    } else {
+      const base = await supabase.from("users").select("id,email,full_name,credits,created_at").eq("id", id).single();
+      result = { ...base, data: base.data ? { ...base.data, phone: "", is_admin: false, user_code: null } : null } as typeof result;
+    }
+  }
+  if (result.error || !result.data) throw result.error ?? new HttpError(404, "User not found");
+  const row = result.data as UserRow;
+  let phone = row.phone ?? "";
+  let userCode = row.user_code && /^[0-9]{7,8}$/.test(row.user_code) ? row.user_code : "";
+  if (!phone || !userCode) {
+    const authUser = await supabase.auth.admin.getUserById(id).catch(() => null);
+    const metaPhone = authUser?.data?.user?.user_metadata?.phone;
+    const metaCode = authUser?.data?.user?.user_metadata?.user_code;
+    if (!phone && typeof metaPhone === "string") phone = metaPhone;
+    if (!userCode && typeof metaCode === "string" && /^[0-9]{7,8}$/.test(metaCode)) userCode = metaCode;
+  }
+  if (!userCode) {
+    userCode = deriveUserCode(row.id);
+    void supabase.from("users").update({ user_code: userCode }).eq("id", row.id);
+  }
+  return {
+    id: row.id,
+    user_code: userCode,
+    email: row.email,
+    full_name: row.full_name,
+    phone,
+    credits: row.credits,
+    is_admin: Boolean(row.is_admin),
+    created_at: row.created_at,
+    avatar: await loadAvatar(row.id),
+    payments_enabled: paymentsEnabled
+  };
+}
+
+const updateProfileSchema = z.object({
+  full_name: z.string().trim().min(1, "Vui lòng nhập họ và tên").max(120),
+  phone: z.string().trim().max(30).optional().default(""),
+  email: z.string().trim().toLowerCase().email("Địa chỉ email không hợp lệ").max(320).optional()
+});
+
+const updatePasswordSchema = z.object({
+  current_password: z.string().min(1).max(128),
+  new_password: z.string().min(8).max(128)
+});
+
 router.get("/user/me", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
+    res.json({ user: await loadUserProfile(userId(req)) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.put("/user/me", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
     const id = userId(req);
-    const { data, error } = await supabase.from("users").select("id,email,full_name,credits").eq("id", id).single();
+    const body = parseBody(updateProfileSchema, req.body);
+    const normalizedPhone = body.phone.replace(/[\s.()-]/g, "");
+    if (normalizedPhone && !/^(?:\+?84|0)(?:[35789]\d{8}|2\d{9})$/.test(normalizedPhone)) {
+      throw new HttpError(400, "Số điện thoại chưa đúng định dạng Việt Nam (ví dụ: 0912345678 hoặc +84912345678).");
+    }
+
+    const current = await loadUserProfile(id);
+    // Changing the login email needs codes sent to the old and new address, which the profile page
+    // does through Supabase Auth. Changing it here would skip that proof of ownership.
+    if (body.email && body.email !== current.email.toLowerCase()) {
+      throw new HttpError(400, "Đổi email cần xác nhận bằng mã gửi tới email. Hãy dùng mục Đổi email trong trang Hồ sơ.");
+    }
+
+    const authUser = await supabase.auth.admin.getUserById(id).catch(() => null);
+    const existingMeta = (authUser?.data?.user?.user_metadata ?? {}) as Record<string, unknown>;
+    const { error: authUpdateError } = await supabase.auth.admin.updateUserById(id, {
+      user_metadata: { ...existingMeta, full_name: body.full_name, phone: normalizedPhone }
+    });
+    if (authUpdateError) throw new HttpError(400, authUpdateError.message);
+
+    let updateRes = await supabase
+      .from("users")
+      .update({ full_name: body.full_name, phone: normalizedPhone })
+      .eq("id", id);
+
+    if (updateRes.error && /phone/i.test(updateRes.error.message)) {
+      updateRes = await supabase
+        .from("users")
+        .update({ full_name: body.full_name })
+        .eq("id", id);
+    }
+    if (updateRes.error) throw updateRes.error;
+
+    res.json({
+      user: await loadUserProfile(id),
+      message: "Đã cập nhật thông tin hồ sơ thành công."
+    });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.put("/user/avatar", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const body = parseBody(z.object({ avatar: imageDataUrlSchema.or(z.literal("")) }), req.body);
+    const { error } = await supabase.from("users").update({ avatar: body.avatar || null }).eq("id", userId(req));
+    if (error && /avatar/i.test(error.message)) {
+      throw new HttpError(503, `Ảnh đại diện cần chạy migration ${MIGRATION_009} trước.`);
+    }
     if (error) throw error;
-    res.json({ user: { ...data, payments_enabled: paymentsEnabled } });
+    res.json({ user: await loadUserProfile(userId(req)) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.put("/user/password", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = userId(req);
+    const body = parseBody(updatePasswordSchema, req.body);
+    if (body.current_password === body.new_password) {
+      throw new HttpError(400, "Mật khẩu mới phải khác mật khẩu hiện tại.");
+    }
+    const current = await loadUserProfile(id);
+    const { error: verifyError } = await authClient.auth.signInWithPassword({
+      email: current.email,
+      password: body.current_password
+    });
+    if (verifyError) {
+      throw new HttpError(401, "Mật khẩu hiện tại không chính xác.");
+    }
+    const { error: updateError } = await supabase.auth.admin.updateUserById(id, {
+      password: body.new_password
+    });
+    if (updateError) throw new HttpError(400, updateError.message);
+    res.json({ updated: true, message: "Đã đổi mật khẩu thành công." });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Copies the login email into public.users after a confirmed change; migration 008 does the same in the database. */
+router.post("/user/email/sync", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = userId(req);
+    const { data, error } = await supabase.auth.admin.getUserById(id);
+    if (error || !data.user?.email) throw new HttpError(502, "Không đọc được email đăng nhập.");
+    const { error: updateError } = await supabase.from("users").update({ email: data.user.email }).eq("id", id);
+    if (updateError) throw updateError;
+    res.json({ user: await loadUserProfile(id) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+/** Reads the flag from the database on every request, so a revoked admin loses access at once. */
+async function requireAdmin(req: AuthenticatedRequest, _res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { data, error } = await supabase.from("users").select("is_admin").eq("id", userId(req)).maybeSingle();
+    if (isMissingAdminColumn(error)) {
+      throw new HttpError(503, `Chức năng quản trị chưa sẵn sàng. Hãy chạy migration ${MIGRATION_007} trước.`);
+    }
+    if (error) throw error;
+    if (!data?.is_admin) {
+      throw new HttpError(403, "Chỉ tài khoản quản trị (Admin) mới có quyền truy cập trang thống kê này.");
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+router.get("/admin/overview", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    res.json({ overview: await fetchAdminOverview() });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+const adminUserListSchema = z.object({
+  q: z.string().trim().max(100).optional(),
+  page: z.coerce.number().int().min(1).max(1000).default(1)
+});
+
+router.get("/admin/users", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const parsed = adminUserListSchema.safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, "Invalid user filters");
+    res.json(await listAdminUsers(parsed.data.q, parsed.data.page));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+const adminDaysSchema = z.object({ days: z.coerce.number().int().refine((value) => [7, 30, 90].includes(value)).default(30) });
+
+router.get("/admin/activity", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const parsed = adminDaysSchema.safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, "days must be 7, 30 or 90");
+    res.json({ activity: await fetchAdminActivity(parsed.data.days) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/admin/ai-usage", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const parsed = adminDaysSchema.safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, "days must be 7, 30 or 90");
+    res.json({ report: await fetchAiUsageReport(parsed.data.days) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/admin/users/:userId", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const id = z.string().uuid().safeParse(req.params.userId);
+    if (!id.success) throw new HttpError(400, "Invalid user id");
+    res.json({ detail: await fetchAdminUserDetail(id.data) });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+const adminTransactionListSchema = z.object({
+  status: z.enum(["PENDING", "SUCCESS", "CANCELLED"]).optional(),
+  page: z.coerce.number().int().min(1).max(1000).default(1)
+});
+
+router.get("/admin/transactions", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const parsed = adminTransactionListSchema.safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, "Invalid transaction filters");
+    res.json(await listAdminTransactions(parsed.data.status, parsed.data.page));
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.get("/admin/jobs", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    res.json({ stats: await fetchAdminJobStats() });
   } catch (error) {
     sendError(res, error);
   }
@@ -385,10 +660,13 @@ router.post("/ai/rewrite-section", requireAuth, async (req: AuthenticatedRequest
   }
 });
 
-const JOB_PAGE_SIZE = 20;
+// Divides evenly into the job grid's 2, 3 or 4 columns.
+const JOB_PAGE_SIZE = 24;
 const jobListSchema = z.object({
   q: z.string().trim().max(100).optional(),
   city: z.string().trim().max(40).optional(),
+  saved: z.enum(["1", "true", "0", "false"]).optional(),
+  category: z.enum(JOB_CATEGORY_FILTERS).optional(),
   page: z.coerce.number().int().min(1).max(1000).default(1)
 });
 
@@ -396,6 +674,58 @@ function jobStoreError(error: { code?: string }) {
   return error.code === "PGRST205"
     ? new HttpError(503, "Kho việc làm chưa sẵn sàng. Hãy chạy migration 004_job_postings.sql rồi chạy npm run jobs:sync.")
     : error;
+}
+
+// 42703 / PGRST202: the category column or the count function from migration 010 is missing.
+function jobCategoryError(error: { code?: string }) {
+  return error.code === "42703" || error.code === "PGRST202"
+    ? new HttpError(503, "Danh mục nghề nghiệp chưa sẵn sàng. Hãy chạy migration 010_job_categories.sql rồi chạy npm run jobs:sync.")
+    : jobStoreError(error);
+}
+
+async function countJobsByCategory(city: string | undefined) {
+  const { data, error } = await supabase.rpc("job_category_counts", { p_city: city || null });
+  if (error) throw jobCategoryError(error);
+  const totals = new Map((data as { category: string; total: number }[] ?? []).map((row) => [row.category, Number(row.total)]));
+  // Every occupation is listed, including ones with no postings yet.
+  return JOB_CATEGORY_GROUPS.map((group) => {
+    const categories = group.categories.map(({ id, label }) => ({ id, label, count: totals.get(id) ?? 0 }));
+    return { id: group.id, label: group.label, count: categories.reduce((sum, item) => sum + item.count, 0), categories };
+  });
+}
+
+function isMissingSavedJobsTable(error: { code?: string; message?: string } | null): boolean {
+  return Boolean(error && (error.code === "PGRST205" || /saved_jobs/i.test(error.message ?? "")));
+}
+
+async function loadSavedJobIds(ownerId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("saved_jobs")
+    .select("job_id,created_at")
+    .eq("user_id", ownerId)
+    .order("created_at", { ascending: false });
+
+  if (!error && data) {
+    return data.map((row) => String(row.job_id));
+  }
+  if (error && !isMissingSavedJobsTable(error)) {
+    throw error;
+  }
+
+  const authUser = await supabase.auth.admin.getUserById(ownerId).catch(() => null);
+  const metaIds = authUser?.data?.user?.user_metadata?.saved_job_ids;
+  if (Array.isArray(metaIds)) {
+    return metaIds.filter((item): item is string => typeof item === "string" && z.string().uuid().safeParse(item).success);
+  }
+  return [];
+}
+
+async function syncSavedJobMetadata(ownerId: string, nextIds: string[]) {
+  const authUser = await supabase.auth.admin.getUserById(ownerId).catch(() => null);
+  const existingMeta = (authUser?.data?.user?.user_metadata ?? {}) as Record<string, unknown>;
+  await supabase.auth.admin.updateUserById(ownerId, {
+    user_metadata: { ...existingMeta, saved_job_ids: nextIds.slice(0, 200) }
+  }).catch(() => null);
 }
 
 async function getJobPosting(id: string) {
@@ -410,10 +740,21 @@ router.get("/jobs", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const parsed = jobListSchema.safeParse(req.query);
     if (!parsed.success) throw new HttpError(400, "Invalid job filters");
-    const { q, city, page } = parsed.data;
+    const { q, city, saved, category, page } = parsed.data;
+    const onlySaved = saved === "1" || saved === "true";
+    const savedIds = await loadSavedJobIds(userId(req));
+
+    if (onlySaved && savedIds.length === 0) {
+      res.json({ jobs: [], total: 0, page, page_size: JOB_PAGE_SIZE, saved_ids: [] });
+      return;
+    }
+
     let query = supabase.from("job_postings")
-      .select("id,company,title,location,city,url,posted_at", { count: "exact" })
+      .select("id,company,title,location,city,url,posted_at,category", { count: "exact" })
       .eq("is_active", true);
+    if (onlySaved) {
+      query = query.in("id", savedIds);
+    }
     // These characters are syntax inside PostgREST's or() filter. Each word must appear in the
     // title, company or description, so "backend typescript" finds postings asking for both.
     const words = (q ?? "").replace(/[%_,()*\\"':]/g, " ").split(/\s+/u).filter(Boolean).slice(0, 5);
@@ -421,13 +762,60 @@ router.get("/jobs", requireAuth, async (req: AuthenticatedRequest, res) => {
       query = query.or(`title.ilike.%${word}%,company.ilike.%${word}%,description.ilike.%${word}%`);
     }
     if (city) query = query.eq("city", city);
+    if (category) query = query.in("category", categoriesOfFilter(category));
     const from = (page - 1) * JOB_PAGE_SIZE;
-    const { data, error, count } = await query
-      .order("posted_at", { ascending: false, nullsFirst: false }).order("id")
-      .range(from, from + JOB_PAGE_SIZE - 1);
+    const [{ data, error, count }, categoryGroups] = await Promise.all([
+      query.order("posted_at", { ascending: false, nullsFirst: false }).order("id").range(from, from + JOB_PAGE_SIZE - 1),
+      countJobsByCategory(city),
+    ]);
     // PGRST103: the requested page is past the last result.
-    if (error && error.code !== "PGRST103") throw jobStoreError(error);
-    res.json({ jobs: data ?? [], total: count ?? 0, page, page_size: JOB_PAGE_SIZE });
+    if (error && error.code !== "PGRST103") throw jobCategoryError(error);
+    res.json({ jobs: data ?? [], total: count ?? 0, page, page_size: JOB_PAGE_SIZE, saved_ids: savedIds, category_groups: categoryGroups });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.post("/jobs/:jobId/save", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const jobId = z.string().uuid().safeParse(req.params.jobId);
+    if (!jobId.success) throw new HttpError(400, "Invalid job ID");
+    const ownerId = userId(req);
+    await getJobPosting(jobId.data);
+
+    const { error } = await supabase
+      .from("saved_jobs")
+      .upsert({ user_id: ownerId, job_id: jobId.data }, { onConflict: "user_id,job_id" });
+    if (error && !isMissingSavedJobsTable(error)) throw error;
+
+    const currentIds = await loadSavedJobIds(ownerId);
+    const nextIds = [jobId.data, ...currentIds.filter((id) => id !== jobId.data)];
+    await syncSavedJobMetadata(ownerId, nextIds);
+
+    res.json({ saved: true, saved_ids: nextIds });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+router.delete("/jobs/:jobId/save", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const jobId = z.string().uuid().safeParse(req.params.jobId);
+    if (!jobId.success) throw new HttpError(400, "Invalid job ID");
+    const ownerId = userId(req);
+
+    const { error } = await supabase
+      .from("saved_jobs")
+      .delete()
+      .eq("user_id", ownerId)
+      .eq("job_id", jobId.data);
+    if (error && !isMissingSavedJobsTable(error)) throw error;
+
+    const currentIds = await loadSavedJobIds(ownerId);
+    const nextIds = currentIds.filter((id) => id !== jobId.data);
+    await syncSavedJobMetadata(ownerId, nextIds);
+
+    res.json({ saved: false, saved_ids: nextIds });
   } catch (error) {
     sendError(res, error);
   }
@@ -993,6 +1381,30 @@ router.post("/interviews/:sessionId/answers/:index/follow-up", requireAuth, asyn
     if (!saved) throw new HttpError(409, "Câu trả lời chính vừa thay đổi. Hãy tải lại trang rồi trả lời câu hỏi nối tiếp mới.");
     res.json({ follow_up: followUp });
   } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// Every typed question spends AI quota, so the chat has a tighter limit than the rest of the API.
+const chatLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 15,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthenticatedRequest).userId ?? req.ip ?? "",
+  message: { error: "Bạn gửi tin nhắn hơi nhanh. Vui lòng chờ một phút rồi thử lại." }
+});
+
+router.post("/chat", requireAuth, chatLimit, async (req: AuthenticatedRequest, res) => {
+  try {
+    const body = parseBody(chatRequestSchema, req.body);
+    res.json({ reply: await chatReply(buildChatInput(body.messages, body.page)) });
+  } catch (error) {
+    // The chat box offers its common questions instead, so users need no detail about the outage.
+    if (error instanceof HttpError && error.status === 503) {
+      sendError(res, new HttpError(503, "Hỗ trợ AI tạm thời chưa khả dụng. Bạn có thể chọn một câu hỏi thường gặp bên dưới."));
+      return;
+    }
     sendError(res, error);
   }
 });

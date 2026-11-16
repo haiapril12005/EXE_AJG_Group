@@ -1,4 +1,5 @@
-const APP_URL = "http://localhost:3000/";
+// The analysis form reads the JD this popup hands over.
+const APP_URL = "http://localhost:3000/analyze";
 const DRAFT_KEY = "cvfit.jd-draft";
 const JD_MIN_LENGTH = 50;
 

@@ -21,7 +21,7 @@ export const JOB_SOURCES: JobSource[] = [
 ];
 
 /** `seenIds` also lists postings whose details failed, so they are not treated as removed. */
-export type ConnectorResult = { jobs: NormalizedJob[]; seenIds: string[]; skipped: number };
+type ConnectorResult = { jobs: NormalizedJob[]; seenIds: string[]; skipped: number };
 
 const USER_AGENT = "JobReady-JobSync/1.0";
 const SMARTRECRUITERS_PAGE_SIZE = 100;
